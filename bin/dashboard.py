@@ -55,6 +55,12 @@ def q(sql, args=()):
 HTML = r"""<!doctype html>
 <html lang="hu"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Codex Assistant · Dashboard</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f1216">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Codex">
+<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="icon" href="/icon.svg">
 <style>
   :root{--bg:#0f1216;--card:#1a1f27;--muted:#8b95a5;--fg:#e6e9ef;--acc:#5b9dff;--line:#2a313c}
   @media(prefers-color-scheme:light){:root{--bg:#f4f6fa;--card:#fff;--muted:#5b6472;--fg:#161a20;--acc:#2563eb;--line:#e2e7ef}}
@@ -158,8 +164,26 @@ async function resolveApp(id,st){await api('/api/approvals/resolve',{method:'POS
 async function loadAudit(){const d=await api('/api/audit');$('#auditt').querySelector('tbody').innerHTML=d.map(x=>`<tr><td class="muted" style="white-space:nowrap">${ts(x.created_at)}</td><td>${esc(x.who||'')}</td><td>${esc(x.action||'')}</td><td>${esc(x.detail||'')}</td></tr>`).join('');}
 function load(t){({kanban:loadK,memory:loadMem,agents:loadAgents,messages:loadMsg,vault:loadVault,approvals:loadApp,audit:loadAudit,log:loadLog}[t]||loadK)();}
 setInterval(()=>$('#clock').textContent=new Date().toLocaleTimeString('hu-HU'),1000);
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}
 load('kanban');
 </script></body></html>"""
+
+
+ICON_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
+            '<rect width="512" height="512" rx="96" fill="#0f1216"/>'
+            '<rect x="128" y="176" width="256" height="192" rx="40" fill="#1a1f27" stroke="#5b9dff" stroke-width="12"/>'
+            '<circle cx="200" cy="272" r="26" fill="#5b9dff"/><circle cx="312" cy="272" r="26" fill="#5b9dff"/>'
+            '<rect x="196" y="330" width="120" height="16" rx="8" fill="#5b9dff"/>'
+            '<rect x="248" y="120" width="16" height="56" fill="#5b9dff"/><circle cx="256" cy="112" r="18" fill="#5b9dff"/>'
+            '</svg>')
+
+SW_JS = r"""const C='codex-assistant-v1';
+self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.add('/')));self.skipWaiting();});
+self.addEventListener('activate',e=>self.clients.claim());
+self.addEventListener('fetch',e=>{const u=new URL(e.request.url);
+  if(u.pathname.startsWith('/api/'))return;
+  e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(resp=>{const cp=resp.clone();caches.open(C).then(c=>c.put(e.request,cp));return resp;}).catch(()=>caches.match('/'))));});
+"""
 
 
 class H(http.server.BaseHTTPRequestHandler):
@@ -176,6 +200,16 @@ class H(http.server.BaseHTTPRequestHandler):
         try:
             if u.path == "/":
                 return self._send(200, HTML, "text/html; charset=utf-8")
+            if u.path == "/manifest.json":
+                return self._send(200, json.dumps({
+                    "name": "Codex Assistant", "short_name": "Codex", "start_url": "/",
+                    "display": "standalone", "background_color": "#0f1216", "theme_color": "#0f1216",
+                    "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}]
+                }), "application/manifest+json")
+            if u.path == "/icon.svg":
+                return self._send(200, ICON_SVG, "image/svg+xml")
+            if u.path == "/sw.js":
+                return self._send(200, SW_JS, "application/javascript")
             if u.path == "/api/agents":
                 return self._send(200, json.dumps(q("SELECT name,role,enabled FROM agents ORDER BY name")))
             if u.path == "/api/memories":
