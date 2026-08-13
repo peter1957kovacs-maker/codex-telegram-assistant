@@ -9,3 +9,9 @@ store/*.log
 .DS_Store
 *.pyc
 __pycache__/
+
+# Generated at runtime by scaffold.sh / user config
+config/agents.json
+agents/*/
+store/*.db-wal
+store/*.db-shm
