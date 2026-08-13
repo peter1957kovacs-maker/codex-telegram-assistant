@@ -7,7 +7,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"
+. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"; . "$ROOT/lib/channels.sh"
 
 ENV_FILE="$ROOT/.env"
 [ -f "$ENV_FILE" ] || { echo "[heartbeat] missing .env"; exit 1; }
@@ -44,7 +44,7 @@ ${hot:-(nincs)}"
       reply="$(cat "$out")"
       trimmed="$(printf '%s' "$reply" | tr -d '[:space:]')"
       if [ -n "$trimmed" ] && [ "$trimmed" != "CSEND" ]; then
-        send "$ALLOWED_USER_ID" "🫧 $reply"
+        notify "🫧 $reply"
         log_add "$SELF" "heartbeat surfaced: $reply"
         log "surfaced to operator"
       else

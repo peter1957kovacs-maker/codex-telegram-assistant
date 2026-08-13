@@ -25,14 +25,11 @@ dbq "UPDATE kanban SET archived_at=$now WHERE status='done' AND archived_at IS N
 [ -n "$stuck_titles" ] && log_add "main" "kanban-audit stuck: $stuck_titles"
 [ "${n_arch:-0}" -gt 0 ] && log_add "main" "kanban-audit archived $n_arch done card(s)"
 
-# Optional Telegram nudge about stuck cards (if .env present).
+# Optional nudge about stuck cards (fan out to configured channels).
 if [ -n "$stuck_titles" ] && [ -f "$ROOT/.env" ]; then
+  . "$ROOT/lib/channels.sh"
   set -a; . "$ROOT/.env"; set +a
-  if [ -n "${TELEGRAM_TOKEN:-}" ] && [ -n "${ALLOWED_USER_ID:-}" ]; then
-    curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-      --data-urlencode "chat_id=${ALLOWED_USER_ID}" \
-      --data-urlencode "text=⚠️ Beragadt kanban kártyák (${STUCK_DAYS}+ nap in_progress):
-${stuck_titles}" >/dev/null 2>&1
-  fi
+  notify "⚠️ Beragadt kanban kártyák (${STUCK_DAYS}+ nap in_progress):
+${stuck_titles}"
 fi
 echo "kanban-audit: stuck flagged, $n_arch archived"
