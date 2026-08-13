@@ -15,3 +15,8 @@ config/agents.json
 agents/*/
 store/*.db-wal
 store/*.db-shm
+
+# Encrypted secret vault + master key -- never commit
+store/secrets/
+store/.vaultkey
+store/vault/
