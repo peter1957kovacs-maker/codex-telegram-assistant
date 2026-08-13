@@ -1,41 +1,46 @@
-# Codex Telegram Assistant
+# Codex Assistant — a Marveen-style system on your ChatGPT subscription
 
-A personal AI assistant that lives on **Telegram** and runs on your **ChatGPT
-subscription** (via the OpenAI Codex CLI) — with **persistent, bounded memory**.
+A multi-agent, **Telegram-native** personal assistant system powered by the
+**OpenAI Codex CLI** (your ChatGPT subscription) — with **tiered persistent
+memory**, a **kanban board**, a **proactive heartbeat**, inter-agent
+collaboration, and a **web dashboard**. It mirrors the building blocks of a
+"Marveen"-style assistant, but runs on Codex instead of Claude Code.
 
-## Why this instead of ChatGPT in the browser?
+## Why not just use ChatGPT in the browser?
 
-A browser ChatGPT tab keeps **one ever-growing conversation**. As it fills up it
-gets slow, laggy, and eventually freezes or stops responding — you've probably
-hit this. This assistant avoids that entirely:
+A browser tab keeps **one ever-growing conversation** — it gets slow, laggy, and
+eventually **freezes / stops responding** as it fills up. This system avoids
+that entirely:
 
-- Every message runs as a **fresh headless `codex exec` call**.
-- It feeds back only a **bounded window** of recent history from a local SQLite
-  store (default: last 12 messages).
-- The context **never grows without bound**, so it never bloats, never lags,
-  never freezes.
+- Every message is a **fresh headless `codex exec`** call.
+- It feeds back only a **bounded window** of recent history + relevant memory
+  from SQLite. Context never grows without bound → **no bloat, no freeze**.
+- It runs **24/7**, reaches you on **Telegram**, remembers across restarts, is
+  **proactive** (the heartbeat pings you when something needs attention), can
+  run **multiple collaborating agents**, and has a **dashboard**.
+- Uses your **ChatGPT subscription** — no per-token API bill.
 
-You also get things a browser tab can't do: it runs **24/7 in the background**,
-reaches you on **Telegram**, remembers across restarts, and (optionally) can run
-tasks on your machine. It uses your **ChatGPT subscription** — no per-token API
-bill.
-
-## How it works
+## Architecture
 
 ```
-Telegram message ─▶ assistant.sh (long-poll)
-                      │  load last N messages from SQLite (memory)
-                      ▼
-                    codex exec  ── generates the reply (ChatGPT)
-                      │  save the exchange back to SQLite
-                      ▼
-                    reply on Telegram
+Telegram ⇄ bin/telegram-bridge.sh (main agent)  ── operator <-> main
+                     │
+              SQLite (store/system.db)
+   ┌─────────────────┼──────────────────────────┐
+ memory (hot/warm/   kanban   agent_messages   daily_log
+  cold/shared)                     │
+                       bin/agent.sh <name>  ── sub-agents, inter-agent
+ bin/heartbeat.sh  ── proactive checks -> Telegram
+ bin/dashboard.py  ── http://127.0.0.1:3420 (kanban/memory/agents/log)
 ```
 
-- `bin/assistant.sh` — the loop: polls Telegram, calls Codex, replies, stores memory.
-- `AGENTS.md` — the assistant's system prompt / persona (edit this to taste).
-- `store/memory.db` — the SQLite memory (created on first run; git-ignored).
-- Only your Telegram user id is allowed to talk to it; everyone else is refused.
+- **Data layer** — `db/schema.sql`, `lib/db.sh`, `lib/memory.sh`.
+- **Agents** — `bin/agent.sh` (generic Codex worker), `config/agents.json`
+  (registry), `bin/scaffold.sh` (materializes agents + `agents/<name>/AGENTS.md`).
+- **Main bridge** — `bin/telegram-bridge.sh` (you ⇄ main; surfaces sub-agent replies).
+- **Heartbeat** — `bin/heartbeat.sh` (proactive; silent unless something matters).
+- **Dashboard** — `bin/dashboard.py` (zero-dependency, stdlib).
+- **Control** — `bin/ctl.sh start|stop|status|logs`.
 
 ## Setup
 
@@ -43,56 +48,58 @@ Telegram message ─▶ assistant.sh (long-poll)
 `curl`, `python3`.
 
 ```bash
-# 1. Install the Codex CLI and sign in with your ChatGPT account (once)
+# 1) Codex CLI + sign in with your ChatGPT account (once)
 npm install -g @openai/codex
 codex login
 
-# 2. Create a Telegram bot with @BotFather -> it gives you a token.
-#    Get your numeric user id from @userinfobot.
+# 2) A Telegram bot (@BotFather -> token) and your numeric id (@userinfobot)
 
-# 3. Configure
-git clone <this-repo> codex-telegram-assistant
-cd codex-telegram-assistant
-bash setup.sh          # checks deps, creates .env
-#   then edit .env: TELEGRAM_TOKEN + ALLOWED_USER_ID
+# 3) Configure
+git clone <this-repo> codex-assistant && cd codex-assistant
+bash setup.sh                 # checks deps, creates .env + config/agents.json
+#   edit .env: TELEGRAM_TOKEN + ALLOWED_USER_ID
+#   (optional) edit config/agents.json to define your agents
 
-# 4. Run it
-bash bin/assistant.sh
-#   message your bot on Telegram — it answers only you.
+# 4) Start everything
+bash bin/ctl.sh start         # scaffolds agents, starts bridge/heartbeat/dashboard/sub-agents
+bash bin/ctl.sh status
 ```
 
-### Run it 24/7 (macOS launchd)
+Then message your bot on Telegram (only your user id is served), and open the
+dashboard at **http://127.0.0.1:3420**.
 
-```bash
-sed "s#__PROJECT_DIR__#$(pwd)#g" launchd/com.codexassistant.plist.template \
-  > ~/Library/LaunchAgents/com.codexassistant.plist
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.codexassistant.plist
-# logs: store/assistant.log ; stop: launchctl bootout gui/$(id -u)/com.codexassistant
-```
+### Always-on (macOS launchd)
 
-## Codex sandbox (what the assistant is allowed to do)
+`launchd/` holds plist templates. Replace `__PROJECT_DIR__` with the project path,
+copy into `~/Library/LaunchAgents/`, and `launchctl bootstrap`. See each template.
 
-Set in `~/.codex/config.toml` (see `config.example.toml`):
+## Configure & customize
 
-- `read-only` — safest, chat only (default).
-- `workspace-write` — can edit files in its working dir (useful for tasks).
-- `danger-full-access` — no sandbox; full machine access. Only if you trust it.
+- **Agents:** `config/agents.json` — name, role, enabled. `main` is the one you
+  chat with; others collaborate via inter-agent messages. Re-run
+  `bin/scaffold.sh` after editing.
+- **Persona:** each agent's `agents/<name>/AGENTS.md` is its system prompt.
+- **Memory window:** `CONTEXT_TURNS` in `.env` (default 12).
+- **Heartbeat cadence:** `HEARTBEAT_INTERVAL` seconds in `.env` (default 1800).
+- **Dashboard port:** `DASHBOARD_PORT` (default 3420).
+- **What agents may do:** `~/.codex/config.toml` `sandbox_mode`
+  (`read-only` / `workspace-write` / `danger-full-access`) — see `config.example.toml`.
 
-## Customize
+## Memory tiers
 
-- **Persona / rules:** edit `AGENTS.md`.
-- **How much it remembers per reply:** `CONTEXT_TURNS` in `.env`.
-- The memory is a plain SQLite table (`messages`) in `store/memory.db` — you can
-  inspect, export, or prune it with any SQLite tool.
+`hot` (active) · `warm` (config/preference) · `cold` (long-term lesson) ·
+`shared` (relevant to other agents). Plain SQLite (`store/system.db`), inspectable
+and searchable from the dashboard or any SQLite tool.
 
-## Security notes
+## Security
 
-- `.env` (your bot token) and `store/` (your memory) are git-ignored — they never
-  get committed.
-- Only `ALLOWED_USER_ID` can drive the assistant.
-- Codex runs sandboxed per `~/.codex/config.toml`; keep it `read-only` unless you
-  deliberately want the assistant to act on your machine.
+- `.env` (bot token), `config/agents.json`, `store/` (all your data) and generated
+  agent dirs are **git-ignored** — nothing secret is committed.
+- Only `ALLOWED_USER_ID` can drive the bot.
+- The dashboard binds to **127.0.0.1** only (localhost).
+- Codex runs sandboxed per `~/.codex/config.toml` — keep `read-only` unless you
+  deliberately want agents to act on the machine.
 
 ## License
 
-MIT — do what you like.
+MIT.
