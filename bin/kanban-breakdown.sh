@@ -3,8 +3,9 @@
 # Usage: bin/kanban-breakdown.sh <card_id>
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"
+. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"; . "$ROOT/lib/codex.sh"
 CODEX="${CODEX_BIN:-codex}"
+MODEL_ARGS=(); while IFS= read -r _a; do MODEL_ARGS+=("$_a"); done < <(codex_model_args "main")
 AGENT_DIR="$ROOT/agents/main"
 db_init
 
@@ -19,7 +20,7 @@ Feladat: ${title}
 Leiras: ${desc}"
 
 out="$(mktemp)"
-if ! printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check -o "$out" ) >/dev/null 2>&1; then
+if ! printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
   echo "codex exec failed"; rm -f "$out"; exit 1
 fi
 

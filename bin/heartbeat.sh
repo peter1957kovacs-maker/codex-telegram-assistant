@@ -7,7 +7,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"; . "$ROOT/lib/channels.sh"
+. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"; . "$ROOT/lib/codex.sh"; . "$ROOT/lib/channels.sh"
 
 ENV_FILE="$ROOT/.env"
 [ -f "$ENV_FILE" ] || { echo "[heartbeat] missing .env"; exit 1; }
@@ -16,6 +16,7 @@ set -a; . "$ENV_FILE"; set +a
 CODEX="${CODEX_BIN:-codex}"
 INTERVAL="${HEARTBEAT_INTERVAL:-1800}"   # seconds between ticks (default 30 min)
 SELF="main"; AGENT_DIR="$ROOT/agents/$SELF"
+MODEL_ARGS=(); while IFS= read -r _a; do MODEL_ARGS+=("$_a"); done < <(codex_model_args "$SELF")
 API="https://api.telegram.org/bot${TELEGRAM_TOKEN}"
 
 db_init
@@ -40,7 +41,7 @@ Friss hot memoria:
 ${hot:-(nincs)}"
 
     out="$(mktemp)"
-    if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check -o "$out" ) >/dev/null 2>&1; then
+    if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
       reply="$(cat "$out")"
       trimmed="$(printf '%s' "$reply" | tr -d '[:space:]')"
       if [ -n "$trimmed" ] && [ "$trimmed" != "CSEND" ]; then

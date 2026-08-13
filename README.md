@@ -71,7 +71,7 @@ Message your bot on Telegram; open **http://127.0.0.1:3420**. Always-on: see
 
 ```
 db/schema.sql            data model (memory FTS5, kanban, inter-agent, approvals, audit, ...)
-lib/{db,memory,obsidian,channels,voice,vault}.sh   helpers
+lib/{db,memory,codex,obsidian,channels,voice,vault}.sh   helpers (codex.sh = model resolution)
 bin/agent.sh             generic Codex agent runtime (inter-agent)
 bin/telegram-bridge.sh   operator <-> main (text + voice), surfaces sub-agent replies
 bin/heartbeat.sh         proactive checks -> notify()
@@ -90,6 +90,7 @@ All optional keys are documented in `.env.example`. Highlights:
 |---|---|
 | `TELEGRAM_TOKEN`, `ALLOWED_USER_ID` | the bot + the only user it serves |
 | `CONTEXT_TURNS` | memory window per reply (default 12) |
+| `CODEX_MODEL` | ad-hoc model override for all agents (per-agent: see below) |
 | `OBSIDIAN_VAULT` | vault folder (default `store/vault`) |
 | `SLACK_WEBHOOK`, `DISCORD_WEBHOOK` | extra outbound notification channels |
 | `VOICE_REPLY`, `WHISPER_MODEL`, `WHISPER_LANG` | voice behavior |
@@ -103,6 +104,43 @@ All optional keys are documented in `.env.example`. Highlights:
   in its `AGENTS.md` (loaded every call), not just the rolling conversation
   window. Shared facts across agents can also go in the `shared` memory tier.
 - **Secrets:** `bin/vault.sh set ID VALUE`, then use `vault:ID` in configs.
+
+## Modellválasztás · Model selection
+
+**Magyar.** Minden ügynök saját modellen futhat, és a modell **egyetlen helyen**
+él: `agents/<név>/.model`. Ezt a `config/agents.json` `"model"` mezőjéből írja ki
+a scaffold, vagy közvetlenül állítod:
+
+```bash
+bin/ctl.sh model                          # melyik ügynök melyik modellen fut
+bin/ctl.sh model <ügynök> <modell>        # átállítás (+ az ügynök újraindítása)
+bin/ctl.sh model <ügynök> default         # vissza a Codex alapértelmezettre
+```
+
+Minden `codex exec` hívás (fő híd, sub-agentek, dream engine, heartbeat, kanban
+felbontás) innen veszi a modellt, `-m` flagként. Ha a modell több helyre lenne
+bemásolva, egy váltás több szerkesztés lenne, amelyek szétcsúsznak: az ügynök
+papíron az egyik modellen "fut", valójában a másikon. `CODEX_MODEL` a `.env`-ben
+mindet felülírja (eseti használatra).
+
+**English.** Each agent can run on its own model, kept in **one place**:
+`agents/<name>/.model` (from the `"model"` field in `config/agents.json`, or via
+`bin/ctl.sh model <agent> <model|default>`, which also restarts that agent). Every
+`codex exec` call site — bridge, sub-agents, dream engine, heartbeat, kanban
+breakdown — reads it and passes `-m`. `CODEX_MODEL` in `.env` overrides all of
+them ad hoc. One source of truth means a model switch can't half-apply.
+
+## Ki kap választ · Who gets a reply
+
+**Magyar.** Az ügynök csak **regisztrált ügynöknek** válaszol vissza az
+inter-agent soron. Cron-jobok, scriptek, külső feederek is írhatnak a sorba;
+azoknak válaszolni felesleges (senki nem olvassa) és a runtime-ok között pattoghat.
+A feladat így is lefut, csak a válasz marad el, és a napló megmondja miért.
+
+**English.** An agent replies only to **registered agents** (a row in the `agents`
+table). Cron jobs, scripts and external feeders can also write to the queue;
+answering those posts a message nobody reads and can bounce between runtimes. The
+work still runs — only the reply is skipped, and the log says why.
 
 ## Security
 
@@ -129,8 +167,8 @@ amire ez a munka támaszkodik, az ő érdeme. Hálás köszönet Szotasznak a Ma
 **English.** This project builds on [**Marveen**](https://github.com/Szotasz/marveen)
 by [**Szotasz**](https://github.com/Szotasz). Marveen ("your AI team that runs
 while you sleep") is an excellent, thoughtfully engineered multi-agent AI
-framework — the whole idea and architecture this work rests on is his. Huge
-thanks to Szotasz for Marveen and for sharing it openly. Check out his work at
+framework — the whole idea and architecture this work rests on is theirs. Huge
+thanks to Szotasz for Marveen and for sharing it openly. Check out their work at
 the links above.
 
 ## License

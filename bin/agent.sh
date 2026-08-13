@@ -8,11 +8,12 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"
+. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"; . "$ROOT/lib/codex.sh"
 
 CODEX="${CODEX_BIN:-codex}"
 SELF="${1:?usage: agent.sh <agent-name>}"
 AGENT_DIR="$ROOT/agents/$SELF"
+MODEL_ARGS=(); while IFS= read -r _a; do MODEL_ARGS+=("$_a"); done < <(codex_model_args "$SELF")
 POLL="${POLL_INTERVAL:-5}"
 
 db_init
@@ -49,13 +50,20 @@ ${win}
 --- vege ---"
 
     out="$(mktemp)"
-    if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check -o "$out" ) >/dev/null 2>&1; then
+    if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
       reply="$(cat "$out")"; [ -z "$reply" ] && reply="(ures valasz)"
       chat_save "$SELF" assistant "$reply"
       msg_done "$mid" "$reply"
-      # Reply back to the sender so conversations flow (main relays to Telegram).
-      msg_send "$SELF" "$from" "$reply"
-      log "msg #$mid done -> replied to $from"
+      # Reply back to the sender so conversations flow (main relays to Telegram) --
+      # but ONLY if the sender is a real agent. Cron jobs, scripts and external
+      # feeders can also write to this queue; answering them posts a message
+      # nobody reads and can bounce between runtimes.
+      if [ -n "$(dbq "SELECT 1 FROM agents WHERE name='$(sql_escape "$from")' LIMIT 1;")" ]; then
+        msg_send "$SELF" "$from" "$reply"
+        log "msg #$mid done -> replied to $from"
+      else
+        log "msg #$mid done -> no reply ('$from' is not a registered agent)"
+      fi
     else
       msg_fail "$mid" "codex exec failed"
       log "msg #$mid FAILED"

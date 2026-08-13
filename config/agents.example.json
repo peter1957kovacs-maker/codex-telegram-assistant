@@ -1,5 +1,6 @@
 {
   "_comment": "Copy to agents.json and edit. Each agent is backed by the Codex CLI (your ChatGPT subscription). 'main' is the one you chat with on Telegram; others collaborate via inter-agent messages.",
+  "_model": "Optional per-agent 'model' field: the Codex model that agent runs on. Omit for the Codex default. It is written to agents/<name>/.model, the single source of truth -- change it later with: bin/ctl.sh model <agent> <model|default>.",
   "agents": [
     {
       "name": "main",

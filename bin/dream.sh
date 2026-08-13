@@ -4,8 +4,9 @@
 # Saves to store/dream.md and as a hot memory (the morning briefing reads it).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"
+. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"; . "$ROOT/lib/codex.sh"
 CODEX="${CODEX_BIN:-codex}"; AGENT_DIR="$ROOT/agents/main"
+MODEL_ARGS=(); while IFS= read -r _a; do MODEL_ARGS+=("$_a"); done < <(codex_model_args "main")
 db_init
 
 # start-of-day epoch (macOS `date -v` or GNU `date -d`)
@@ -26,7 +27,7 @@ Nyitott kanban:
 ${kb:-(nincs)}"
 
 out="$(mktemp)"
-if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check -o "$out" ) >/dev/null 2>&1; then
+if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
   reply="$(cat "$out")"
   { echo "# Dream $(date +%F)"; echo; printf '%s\n' "$reply"; } > "$ROOT/store/dream.md"
   mem_save main hot "dream" "Dream $(date +%F): $reply"

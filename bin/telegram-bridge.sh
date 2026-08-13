@@ -8,7 +8,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"; . "$ROOT/lib/voice.sh"
+. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"; . "$ROOT/lib/codex.sh"; . "$ROOT/lib/voice.sh"
 
 ENV_FILE="$ROOT/.env"
 [ -f "$ENV_FILE" ] || { echo "[bridge] missing .env"; exit 1; }
@@ -19,6 +19,7 @@ CODEX="${CODEX_BIN:-codex}"
 
 SELF="main"
 AGENT_DIR="$ROOT/agents/$SELF"
+MODEL_ARGS=(); while IFS= read -r _a; do MODEL_ARGS+=("$_a"); done < <(codex_model_args "$SELF")
 API="https://api.telegram.org/bot${TELEGRAM_TOKEN}"
 OFFSET_FILE="$ROOT/store/.tg_offset"
 
@@ -112,7 +113,7 @@ ${win}
 --- vege ---"
 
     out="$(mktemp)"
-    if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check -o "$out" ) >/dev/null 2>&1; then
+    if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
       reply="$(cat "$out")"; [ -z "$reply" ] && reply="(ures valasz)"
     else
       reply="[hiba: a Codex most nem tudott valaszolni. Probald ujra.]"

@@ -10,16 +10,19 @@ CFG="$ROOT/config/agents.json"
 [ -f "$CFG" ] || CFG="$ROOT/config/agents.example.json"
 [ -f "$CFG" ] || { echo "no agents config"; exit 1; }
 
-python3 - "$CFG" <<'PY' | while IFS=$'\t' read -r name role enabled; do
+python3 - "$CFG" <<'PY' | while IFS=$'\t' read -r name role enabled model; do
 import json,sys
 d=json.load(open(sys.argv[1]))
 for a in d.get("agents",[]):
     if a.get("name","").startswith("_"): continue
-    print("\t".join([a.get("name",""), a.get("role",""), "1" if a.get("enabled",True) else "0"]))
+    print("\t".join([a.get("name",""), a.get("role",""), "1" if a.get("enabled",True) else "0", a.get("model","")]))
 PY
   [ -z "$name" ] && continue
   dir="$ROOT/agents/$name"
   mkdir -p "$dir"
+  # Model: one place per agent (agents/<name>/.model). Empty = Codex default.
+  # Change later with: bin/ctl.sh model <name> <model>
+  [ -n "${model:-}" ] && printf '%s\n' "$model" > "$dir/.model"
   if [ ! -f "$dir/AGENTS.md" ]; then
     cat > "$dir/AGENTS.md" <<EOF
 # ${name}

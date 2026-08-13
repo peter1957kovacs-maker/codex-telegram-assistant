@@ -2,10 +2,10 @@
 # Start / stop / status for all services. Portable (nohup-based), works on
 # macOS and Linux. For always-on macOS auto-start, see launchd/ templates.
 #
-#   bin/ctl.sh start | stop | status | logs
+#   bin/ctl.sh start | stop | status | logs | model [<agent> [<model>|default]]
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"
+. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"; . "$ROOT/lib/codex.sh"
 
 PIDDIR="$ROOT/store/pids"; mkdir -p "$PIDDIR"
 LOGDIR="$ROOT/store"
@@ -65,6 +65,31 @@ case "${1:-status}" in
   logs)
     tail -n 40 "$LOGDIR"/*.log 2>/dev/null
     ;;
+  model)
+    # Show or change which model an agent runs on. Single source of truth:
+    # agents/<name>/.model -- no duplicate copies in launchers/services to drift.
+    agent="${2:-}"; want="${3:-}"
+    if [ -z "$agent" ]; then
+      for a in $(dbq "SELECT name FROM agents ORDER BY name;"); do
+        printf '  %-12s %s\n' "$a" "$(codex_model_show "$a")"
+      done
+      echo "  (change: bin/ctl.sh model <agent> <model|default>)"
+      exit 0
+    fi
+    [ -d "$ROOT/agents/$agent" ] || { echo "no such agent: $agent"; exit 1; }
+    if [ -z "$want" ]; then echo "  $agent: $(codex_model_show "$agent")"; exit 0; fi
+    if [ "$want" = "default" ]; then rm -f "$ROOT/agents/$agent/.model"
+    else printf '%s\n' "$want" > "$ROOT/agents/$agent/.model"; fi
+    echo "  $agent -> $(codex_model_show "$agent")"
+    # Restart that agent's runtime so it picks the model up (it reads at start).
+    pf="$PIDDIR/agent-$agent.pid"
+    if [ -f "$pf" ] && kill -0 "$(cat "$pf" 2>/dev/null)" 2>/dev/null; then
+      kill "$(cat "$pf")" 2>/dev/null; rm -f "$pf"
+      start_one "agent-$agent" bash "$ROOT/bin/agent.sh" "$agent"
+    elif [ "$agent" = "main" ]; then
+      echo "  restart the bridge/heartbeat for 'main' to take effect: bin/ctl.sh stop && bin/ctl.sh start"
+    fi
+    ;;
   *)
-    echo "usage: bin/ctl.sh start|stop|status|logs"; exit 1;;
+    echo "usage: bin/ctl.sh start|stop|status|logs|model [<agent> [<model>|default]]"; exit 1;;
 esac
