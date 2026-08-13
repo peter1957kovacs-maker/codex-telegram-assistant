@@ -20,3 +20,4 @@ store/*.db-shm
 store/secrets/
 store/.vaultkey
 store/vault/
+config/peers.json

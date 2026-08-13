@@ -14,6 +14,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.environ.get("DB", os.path.join(ROOT, "store", "system.db"))
 PORT = int(os.environ.get("DASHBOARD_PORT", "3420"))
 VAULT = os.environ.get("OBSIDIAN_VAULT", os.path.join(ROOT, "store", "vault"))
+FED_TOKEN = os.environ.get("FEDERATION_TOKEN", "")
+FED_NAME = os.environ.get("FEDERATION_NAME", "codex-assistant")
 
 
 def vault_list():
@@ -234,6 +236,12 @@ class H(http.server.BaseHTTPRequestHandler):
                 return self._send(200, json.dumps(q("SELECT * FROM approvals ORDER BY (status='pending') DESC, id DESC LIMIT 100")))
             if u.path == "/api/audit":
                 return self._send(200, json.dumps(q("SELECT * FROM audit_log ORDER BY id DESC LIMIT 200")))
+            if u.path == "/federation/hello":
+                return self._send(200, json.dumps({
+                    "name": FED_NAME,
+                    "capabilities": ["memory", "kanban", "inter-agent", "obsidian", "voice"],
+                    "federation": bool(FED_TOKEN),
+                }))
             if u.path == "/api/vault":
                 return self._send(200, json.dumps(vault_list()))
             if u.path == "/api/vault/read":
@@ -249,6 +257,17 @@ class H(http.server.BaseHTTPRequestHandler):
         data = urllib.parse.parse_qs(self.rfile.read(ln).decode() if ln else "")
         g = lambda k, d="": data.get(k, [d])[0]
         try:
+            if u.path == "/federation/inbox":
+                # Inbound message from a federated peer (shared-token auth).
+                if not FED_TOKEN or self.headers.get("X-Fed-Token", "") != FED_TOKEN:
+                    return self._send(403, json.dumps({"error": "forbidden"}))
+                frm = g("from", "peer")
+                msg = g("message", "")
+                if msg:
+                    q("INSERT INTO agent_messages(from_agent,to_agent,content) VALUES(?,?,?)",
+                      ("fed:" + frm, "main", msg))
+                    audit("federation.inbox", frm + ": " + msg[:60])
+                return self._send(200, json.dumps({"ok": True}))
             if u.path == "/api/kanban/add":
                 if g("title"):
                     q("INSERT INTO kanban(title,priority) VALUES(?,?)", (g("title"), g("priority", "normal")))

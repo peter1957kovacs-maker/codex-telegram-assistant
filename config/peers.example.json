@@ -1,0 +1,6 @@
+{
+  "_comment": "Copy to peers.json and add your federated instances. A peer is another Codex-Assistant reachable over HTTP. Messages you send land in that peer's operator inbox as fed:<your FEDERATION_NAME>. The token must match the peer's FEDERATION_TOKEN.",
+  "peers": [
+    { "name": "example", "url": "http://192.168.1.50:3420", "token": "shared-secret-here" }
+  ]
+}
