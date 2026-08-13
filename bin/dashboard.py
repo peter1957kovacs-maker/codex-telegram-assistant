@@ -136,8 +136,12 @@ class H(http.server.BaseHTTPRequestHandler):
             if u.path == "/api/memories":
                 term = urllib.parse.parse_qs(u.query).get("q", [""])[0]
                 if term:
-                    rows = q("SELECT * FROM memories WHERE content LIKE ? OR keywords LIKE ? ORDER BY id DESC LIMIT 200",
-                             (f"%{term}%", f"%{term}%"))
+                    try:
+                        rows = q("SELECT m.* FROM memories_fts f JOIN memories m ON m.id=f.rowid "
+                                 "WHERE memories_fts MATCH ? ORDER BY rank LIMIT 200", (term,))
+                    except Exception:
+                        rows = q("SELECT * FROM memories WHERE content LIKE ? OR keywords LIKE ? ORDER BY id DESC LIMIT 200",
+                                 (f"%{term}%", f"%{term}%"))
                 else:
                     rows = q("SELECT * FROM memories ORDER BY id DESC LIMIT 200")
                 return self._send(200, json.dumps(rows))

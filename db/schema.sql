@@ -29,6 +29,22 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE INDEX IF NOT EXISTS idx_mem_agent ON memories(agent_id);
 CREATE INDEX IF NOT EXISTS idx_mem_cat   ON memories(category);
 
+-- Full-text search over memory (SQLite FTS5, no external dependency).
+-- Kept in sync with `memories` via triggers.
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+  content, keywords, content='memories', content_rowid='id'
+);
+CREATE TRIGGER IF NOT EXISTS mem_ai AFTER INSERT ON memories BEGIN
+  INSERT INTO memories_fts(rowid, content, keywords) VALUES (new.id, new.content, new.keywords);
+END;
+CREATE TRIGGER IF NOT EXISTS mem_ad AFTER DELETE ON memories BEGIN
+  INSERT INTO memories_fts(memories_fts, rowid, content, keywords) VALUES('delete', old.id, old.content, old.keywords);
+END;
+CREATE TRIGGER IF NOT EXISTS mem_au AFTER UPDATE ON memories BEGIN
+  INSERT INTO memories_fts(memories_fts, rowid, content, keywords) VALUES('delete', old.id, old.content, old.keywords);
+  INSERT INTO memories_fts(rowid, content, keywords) VALUES (new.id, new.content, new.keywords);
+END;
+
 -- Inter-agent messages (delivered by the runtime poller).
 CREATE TABLE IF NOT EXISTS agent_messages (
   id           INTEGER PRIMARY KEY,

@@ -12,9 +12,11 @@ mem_recent() { # agent [limit]
   local a="$1" n="${2:-10}"
   dbq "SELECT category||' | '||content FROM memories WHERE agent_id='$(sql_escape "$a")' ORDER BY id DESC LIMIT $n;"
 }
-mem_search() { # agent term
-  local a="$1" t; t=$(sql_escape "$2")
-  dbq "SELECT category||' | '||content FROM memories WHERE agent_id='$(sql_escape "$a")' AND (content LIKE '%$t%' OR keywords LIKE '%$t%') ORDER BY id DESC LIMIT 20;"
+mem_search() { # agent term  -- FTS5 ranked, with a LIKE fallback
+  local a="$1" ea et rt
+  ea=$(sql_escape "$a"); et=$(sql_escape "$2"); rt=$(sql_escape "$2")
+  sqlite3 "$DB" "SELECT m.category||' | '||m.content FROM memories_fts f JOIN memories m ON m.id=f.rowid WHERE memories_fts MATCH '$et' AND m.agent_id='$ea' ORDER BY rank LIMIT 20;" 2>/dev/null \
+    || dbq "SELECT category||' | '||content FROM memories WHERE agent_id='$ea' AND (content LIKE '%$rt%' OR keywords LIKE '%$rt%') ORDER BY id DESC LIMIT 20;"
 }
 
 # --- chat window (bounded conversation memory) ---
