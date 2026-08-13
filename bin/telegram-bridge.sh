@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Telegram bridge for the 'main' agent.
+#   - Operator (you) <-> main: your Telegram messages run through main's Codex
+#     with a bounded chat window + memory as context; the reply comes back.
+#   - Sub-agent -> operator: inter-agent messages addressed to 'main' from other
+#     agents are surfaced to your Telegram (so delegated work reaches you).
+# Only ALLOWED_USER_ID may drive it.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"
+
+ENV_FILE="$ROOT/.env"
+[ -f "$ENV_FILE" ] || { echo "[bridge] missing .env"; exit 1; }
+set -a; . "$ENV_FILE"; set +a
+: "${TELEGRAM_TOKEN:?set in .env}"; : "${ALLOWED_USER_ID:?set in .env}"
+CONTEXT_TURNS="${CONTEXT_TURNS:-12}"
+CODEX="${CODEX_BIN:-codex}"
+
+SELF="main"
+AGENT_DIR="$ROOT/agents/$SELF"
+API="https://api.telegram.org/bot${TELEGRAM_TOKEN}"
+OFFSET_FILE="$ROOT/store/.tg_offset"
+
+db_init
+[ -d "$AGENT_DIR" ] || bash "$ROOT/bin/scaffold.sh" >/dev/null 2>&1
+log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S')] [bridge] $*"; }
+send() { curl -s "$API/sendMessage" --data-urlencode "chat_id=$1" --data-urlencode "text=$2" >/dev/null 2>&1; }
+
+offset="$(cat "$OFFSET_FILE" 2>/dev/null || echo 0)"
+log "started; operator=$ALLOWED_USER_ID; context=$CONTEXT_TURNS"
+
+while true; do
+  # 1) Surface sub-agent replies addressed to 'main' -> operator's Telegram.
+  pend="$(msg_pending "$SELF")"
+  if [ -n "$pend" ]; then
+    while IFS='|' read -r mid from; do
+      [ -z "$mid" ] && continue
+      c="$(dbq "SELECT content FROM agent_messages WHERE id=$mid;")"
+      msg_claim "$mid"; msg_done "$mid" "(forwarded to operator)"
+      send "$ALLOWED_USER_ID" "[$from]: $c"
+    done <<< "$pend"
+  fi
+
+  # 2) Operator messages from Telegram.
+  resp="$(curl -s --max-time 20 "$API/getUpdates?timeout=12&offset=${offset}&allowed_updates=%5B%22message%22%5D")"
+  [ -z "$resp" ] && { sleep 1; continue; }
+
+  parsed="$(printf '%s' "$resp" | python3 -c '
+import json,sys,base64
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(0)
+if not d.get("ok"): sys.exit(0)
+for u in d.get("result",[]):
+    m=u.get("message") or {}
+    uid=u.get("update_id","")
+    frm=(m.get("from") or {}).get("id","")
+    chat=(m.get("chat") or {}).get("id","")
+    text=m.get("text","") or ""
+    sys.stdout.write(str(uid)+"\t"+str(frm)+"\t"+str(chat)+"\t"+base64.b64encode(text.encode()).decode()+"\n")
+')"
+  [ -z "$parsed" ] && continue
+
+  max_id="$offset"
+  while IFS=$'\t' read -r uid frm chat b64; do
+    [ -z "$uid" ] && continue
+    [ "$((uid+1))" -gt "$max_id" ] && max_id="$((uid+1))"
+    text="$(printf '%s' "$b64" | base64 --decode 2>/dev/null)"
+    if [ "$frm" != "$ALLOWED_USER_ID" ]; then
+      [ -n "$chat" ] && send "$chat" "This is a private assistant."; continue
+    fi
+    [ -z "$text" ] && continue
+
+    if ! "$CODEX" login status >/dev/null 2>&1; then
+      send "$chat" "A Codex nincs bejelentkezve. Futtasd egyszer: codex login"; continue
+    fi
+
+    chat_save "$SELF" user "$text"
+    win="$(chat_window "$SELF" "$CONTEXT_TURNS")"
+    mem="$(mem_recent "$SELF" 8)"
+    prompt="Ez a beszelgetes eddigi menete (memoria-ablak). Valaszolj a LEGUTOLSO 'user' uzenetre termeszetesen, a kontextust figyelembe veve. Ha mas ugynoknek kell delegalnod, azt a rendszer inter-agent csatornajan teszed.
+
+Hosszutavu memoria (relevans tenyek):
+${mem}
+
+--- beszelgetes ---
+${win}
+--- vege ---"
+
+    out="$(mktemp)"
+    if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check -o "$out" ) >/dev/null 2>&1; then
+      reply="$(cat "$out")"; [ -z "$reply" ] && reply="(ures valasz)"
+    else
+      reply="[hiba: a Codex most nem tudott valaszolni. Probald ujra.]"
+    fi
+    rm -f "$out"
+    chat_save "$SELF" assistant "$reply"
+    send "$chat" "$reply"
+    log "answered operator (${#reply} chars)"
+  done <<< "$parsed"
+
+  offset="$max_id"
+  printf '%s' "$offset" > "$OFFSET_FILE"
+done
