@@ -8,7 +8,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"
+. "$ROOT/lib/db.sh"; . "$ROOT/lib/memory.sh"; . "$ROOT/lib/voice.sh"
 
 ENV_FILE="$ROOT/.env"
 [ -f "$ENV_FILE" ] || { echo "[bridge] missing .env"; exit 1; }
@@ -57,17 +57,31 @@ for u in d.get("result",[]):
     frm=(m.get("from") or {}).get("id","")
     chat=(m.get("chat") or {}).get("id","")
     text=m.get("text","") or ""
-    sys.stdout.write(str(uid)+"\t"+str(frm)+"\t"+str(chat)+"\t"+base64.b64encode(text.encode()).decode()+"\n")
+    voice=(m.get("voice") or {}).get("file_id","")
+    sys.stdout.write(str(uid)+"\t"+str(frm)+"\t"+str(chat)+"\t"+base64.b64encode(text.encode()).decode()+"\t"+str(voice)+"\n")
 ')"
   [ -z "$parsed" ] && continue
 
   max_id="$offset"
-  while IFS=$'\t' read -r uid frm chat b64; do
+  while IFS=$'\t' read -r uid frm chat b64 voice; do
     [ -z "$uid" ] && continue
     [ "$((uid+1))" -gt "$max_id" ] && max_id="$((uid+1))"
     text="$(printf '%s' "$b64" | base64 --decode 2>/dev/null)"
     if [ "$frm" != "$ALLOWED_USER_ID" ]; then
       [ -n "$chat" ] && send "$chat" "This is a private assistant."; continue
+    fi
+
+    # Voice message -> download + transcribe (Whisper) into text.
+    was_voice=0
+    if [ -z "$text" ] && [ -n "$voice" ]; then
+      was_voice=1
+      fp="$(curl -s "$API/getFile?file_id=$voice" | python3 -c 'import json,sys;print((json.load(sys.stdin).get("result") or {}).get("file_path",""))' 2>/dev/null)"
+      if [ -n "$fp" ]; then
+        oga="$(mktemp).oga"
+        curl -s "https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/$fp" -o "$oga" 2>/dev/null
+        text="$(stt "$oga")"; rm -f "$oga"
+      fi
+      [ -z "$text" ] && { send "$chat" "(nem sikerült a hangot leiratozni; telepítve van a whisper?)"; continue; }
     fi
     [ -z "$text" ] && continue
 
@@ -105,7 +119,18 @@ ${win}
     fi
     rm -f "$out"
     chat_save "$SELF" assistant "$reply"
-    send "$chat" "$reply"
+    # Voice reply if the inbound was voice and VOICE_REPLY is on.
+    if [ "$was_voice" = 1 ] && [ "${VOICE_REPLY:-0}" = 1 ]; then
+      ogg="$(mktemp).ogg"
+      if tts "$reply" "$ogg"; then
+        curl -s "$API/sendVoice" -F "chat_id=$chat" -F "voice=@$ogg" >/dev/null 2>&1
+      else
+        send "$chat" "$reply"
+      fi
+      rm -f "$ogg"
+    else
+      send "$chat" "$reply"
+    fi
     log "answered operator (${#reply} chars)"
   done <<< "$parsed"
 
