@@ -23,6 +23,13 @@ def vault_list():
         return []
 
 
+def audit(action, detail=""):
+    try:
+        q("INSERT INTO audit_log(who,action,detail) VALUES('dashboard',?,?)", (action, detail))
+    except Exception:
+        pass
+
+
 def vault_read(name):
     # path-safe: strip separators, only read a .md inside VAULT
     safe = os.path.basename(name).replace("/", "").replace("..", "")
@@ -79,6 +86,8 @@ HTML = r"""<!doctype html>
     <button data-t="agents">Ügynökök</button>
     <button data-t="messages">Üzenetek</button>
     <button data-t="vault">Obsidian</button>
+    <button data-t="approvals">Jóváhagyás</button>
+    <button data-t="audit">Audit</button>
     <button data-t="log">Napló</button>
   </nav>
   <span class="muted" id="clock" style="margin-left:auto"></span>
@@ -109,6 +118,8 @@ HTML = r"""<!doctype html>
     <div class="card" style="min-width:200px"><h3 style="margin-top:0;font-size:13px;color:var(--muted)">Jegyzetek</h3><div id="vlist"></div></div>
     <div class="card" style="flex:1"><pre id="vbody" style="white-space:pre-wrap;font:inherit;margin:0">Válassz egy jegyzetet…</pre></div>
   </div></section>
+  <section id="approvals" class="hide"><div class="card"><table id="appt"><thead><tr><th>#</th><th>Ügynök</th><th>Művelet</th><th>Állapot</th><th></th></tr></thead><tbody></tbody></table></div></section>
+  <section id="audit" class="hide"><div class="card"><table id="auditt"><thead><tr><th>Idő</th><th>Ki</th><th>Művelet</th><th>Részlet</th></tr></thead><tbody></tbody></table></div></section>
   <section id="log" class="hide"><div class="card"><table id="logt"><tbody></tbody></table></div></section>
 </main>
 <script>
@@ -117,7 +128,7 @@ function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':
 function ts(x){return x?new Date(x*1000).toLocaleString('hu-HU'):''}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');
-  ['kanban','memory','agents','messages','vault','log'].forEach(id=>$('#'+id).classList.toggle('hide',id!==b.dataset.t));
+  ['kanban','memory','agents','messages','vault','approvals','audit','log'].forEach(id=>$('#'+id).classList.toggle('hide',id!==b.dataset.t));
   load(b.dataset.t);
 });
 const COLS=[['planned','Tervezett'],['in_progress','Folyamatban'],['waiting','Várakozik'],['done','Kész']];
@@ -142,7 +153,10 @@ async function loadMsg(){const d=await api('/api/messages');$('#msgt').querySele
 async function loadLog(){const d=await api('/api/daily_log');$('#logt').querySelector('tbody').innerHTML=d.map(x=>`<tr><td class="muted" style="white-space:nowrap">${ts(x.created_at)}</td><td>${esc(x.entry)}</td></tr>`).join('');}
 async function loadVault(){const d=await api('/api/vault');$('#vlist').innerHTML=d.length?d.map(n=>`<div class="kc" style="cursor:pointer" onclick="openNote('${encodeURIComponent(n)}')">${esc(n)}</div>`).join(''):'<span class="muted">Üres vault</span>';}
 async function openNote(n){const d=await api('/api/vault/read?f='+n);$('#vbody').textContent=d.content||'(üres)';}
-function load(t){({kanban:loadK,memory:loadMem,agents:loadAgents,messages:loadMsg,vault:loadVault,log:loadLog}[t]||loadK)();}
+async function loadApp(){const d=await api('/api/approvals');$('#appt').querySelector('tbody').innerHTML=d.map(a=>`<tr><td>${a.id}</td><td>${esc(a.agent_id||'')}</td><td>${esc(a.action)}</td><td><span class="tag">${a.status}</span></td><td>${a.status==='pending'?`<button class="tag" onclick="resolveApp(${a.id},'approved')">✓</button> <button class="tag" onclick="resolveApp(${a.id},'denied')">✗</button>`:''}</td></tr>`).join('');}
+async function resolveApp(id,st){await api('/api/approvals/resolve',{method:'POST',body:new URLSearchParams({id,status:st})});loadApp();}
+async function loadAudit(){const d=await api('/api/audit');$('#auditt').querySelector('tbody').innerHTML=d.map(x=>`<tr><td class="muted" style="white-space:nowrap">${ts(x.created_at)}</td><td>${esc(x.who||'')}</td><td>${esc(x.action||'')}</td><td>${esc(x.detail||'')}</td></tr>`).join('');}
+function load(t){({kanban:loadK,memory:loadMem,agents:loadAgents,messages:loadMsg,vault:loadVault,approvals:loadApp,audit:loadAudit,log:loadLog}[t]||loadK)();}
 setInterval(()=>$('#clock').textContent=new Date().toLocaleTimeString('hu-HU'),1000);
 load('kanban');
 </script></body></html>"""
@@ -182,6 +196,10 @@ class H(http.server.BaseHTTPRequestHandler):
                 return self._send(200, json.dumps(q("SELECT * FROM agent_messages ORDER BY id DESC LIMIT 100")))
             if u.path == "/api/daily_log":
                 return self._send(200, json.dumps(q("SELECT * FROM daily_log ORDER BY id DESC LIMIT 100")))
+            if u.path == "/api/approvals":
+                return self._send(200, json.dumps(q("SELECT * FROM approvals ORDER BY (status='pending') DESC, id DESC LIMIT 100")))
+            if u.path == "/api/audit":
+                return self._send(200, json.dumps(q("SELECT * FROM audit_log ORDER BY id DESC LIMIT 200")))
             if u.path == "/api/vault":
                 return self._send(200, json.dumps(vault_list()))
             if u.path == "/api/vault/read":
@@ -200,9 +218,17 @@ class H(http.server.BaseHTTPRequestHandler):
             if u.path == "/api/kanban/add":
                 if g("title"):
                     q("INSERT INTO kanban(title,priority) VALUES(?,?)", (g("title"), g("priority", "normal")))
+                    audit("kanban.add", g("title"))
                 return self._send(200, json.dumps({"ok": True}))
             if u.path == "/api/kanban/move":
                 q("UPDATE kanban SET status=?, updated_at=strftime('%s','now') WHERE id=?", (g("status", "planned"), g("id", "0")))
+                audit("kanban.move", f"#{g('id')} -> {g('status')}")
+                return self._send(200, json.dumps({"ok": True}))
+            if u.path == "/api/approvals/resolve":
+                st = g("status", "denied")
+                st = st if st in ("approved", "denied") else "denied"
+                q("UPDATE approvals SET status=?, resolved_at=strftime('%s','now') WHERE id=?", (st, g("id", "0")))
+                audit("approval." + st, f"#{g('id')}")
                 return self._send(200, json.dumps({"ok": True}))
             if u.path == "/api/kanban/breakdown":
                 cid = g("id", "")
@@ -215,6 +241,7 @@ class H(http.server.BaseHTTPRequestHandler):
                 if g("content"):
                     q("INSERT INTO memories(agent_id,content,category,keywords) VALUES(?,?,?,?)",
                       (g("agent", "main"), g("content"), g("category", "hot"), g("keywords", "")))
+                    audit("memory.add", g("category", "hot") + ": " + g("content")[:60])
                 return self._send(200, json.dumps({"ok": True}))
         except Exception as e:
             return self._send(500, json.dumps({"error": str(e)}))

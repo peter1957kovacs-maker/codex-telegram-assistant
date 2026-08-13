@@ -90,3 +90,22 @@ CREATE TABLE IF NOT EXISTS daily_log (
   entry       TEXT,
   created_at  INTEGER DEFAULT (strftime('%s','now'))
 );
+
+-- Approvals: an agent requests operator sign-off before a risky action.
+CREATE TABLE IF NOT EXISTS approvals (
+  id          INTEGER PRIMARY KEY,
+  agent_id    TEXT,
+  action      TEXT NOT NULL,
+  status      TEXT DEFAULT 'pending' CHECK(status IN ('pending','approved','denied')),
+  created_at  INTEGER DEFAULT (strftime('%s','now')),
+  resolved_at INTEGER
+);
+
+-- Audit log: every state-changing action, for traceability.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id          INTEGER PRIMARY KEY,
+  who         TEXT,      -- 'dashboard' | agent name
+  action      TEXT,
+  detail      TEXT,
+  created_at  INTEGER DEFAULT (strftime('%s','now'))
+);

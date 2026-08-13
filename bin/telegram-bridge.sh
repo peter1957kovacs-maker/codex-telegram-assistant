@@ -71,6 +71,16 @@ for u in d.get("result",[]):
     fi
     [ -z "$text" ] && continue
 
+    # Approval commands from the operator (approve/deny an id).
+    case "$text" in
+      approve\ [0-9]*|jovahagy\ [0-9]*|elfogad\ [0-9]*)
+        aid="${text##* }"; approval_resolve "$aid" approved; audit "$ALLOWED_USER_ID" "approval.approved" "#$aid"
+        send "$chat" "Jóváhagyva: #$aid"; continue;;
+      deny\ [0-9]*|elutasit\ [0-9]*|elutasít\ [0-9]*)
+        aid="${text##* }"; approval_resolve "$aid" denied; audit "$ALLOWED_USER_ID" "approval.denied" "#$aid"
+        send "$chat" "Elutasítva: #$aid"; continue;;
+    esac
+
     if ! "$CODEX" login status >/dev/null 2>&1; then
       send "$chat" "A Codex nincs bejelentkezve. Futtasd egyszer: codex login"; continue
     fi

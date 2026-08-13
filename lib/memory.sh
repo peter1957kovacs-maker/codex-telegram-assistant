@@ -54,3 +54,14 @@ kanban_stuck()   { dbq "UPDATE kanban SET stuck=$2 WHERE id=$1;"; }
 
 # --- daily log ---
 log_add() { local ec; ec=$(sql_escape "$2"); dbq "INSERT INTO daily_log(agent_id,entry) VALUES('$(sql_escape "$1")','$ec');"; }
+
+# --- approvals ---
+approval_request() { # agent action  -> prints new id
+  local ea ec; ea=$(sql_escape "$1"); ec=$(sql_escape "$2")
+  dbq "INSERT INTO approvals(agent_id,action) VALUES('$ea','$ec'); SELECT last_insert_rowid();"
+}
+approval_resolve() { dbq "UPDATE approvals SET status='$2', resolved_at=strftime('%s','now') WHERE id=$1;"; }  # id approved|denied
+approval_status()  { dbq "SELECT status FROM approvals WHERE id=$1;"; }
+
+# --- audit ---
+audit() { local ea ec; ea=$(sql_escape "$2"); ec=$(sql_escape "$3"); dbq "INSERT INTO audit_log(who,action,detail) VALUES('$(sql_escape "$1")','$ea','$ec');"; }
