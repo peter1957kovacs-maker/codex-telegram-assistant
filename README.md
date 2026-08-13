@@ -1,5 +1,19 @@
 # Codex Assistant — a Marveen-style AI system on your ChatGPT subscription
 
+> **Épült a [Marveen](https://github.com/Szotasz/marveen) rendszerre, amelyet [Szotasz](https://github.com/Szotasz) készített. · Built on [Marveen](https://github.com/Szotasz/marveen) by [Szotasz](https://github.com/Szotasz).**
+
+## Magyar
+
+Egy több-ügynökös, **Telegram-alapú** személyi asszisztens rendszer, amit az
+**OpenAI Codex CLI** (a ChatGPT-előfizetésed) hajt. A [Marveen](https://github.com/Szotasz/marveen)
+rendszer felépítését követi — réteges memória, kanban, proaktív heartbeat, több
+együttműködő ügynök, web dashboard, Obsidian jegyzetek, hang és több —, de
+**Codexen fut Claude Code helyett**, **per-token API-költség nélkül**. Mivel
+minden üzenet egy friss hívás, korlátozott memória-ablakkal, **sosem lassul be
+vagy fagy le** úgy, mint a böngészős ChatGPT egy hosszú beszélgetésben.
+
+## English
+
 A multi-agent, **Telegram-native** personal-assistant system powered by the
 **OpenAI Codex CLI** (your ChatGPT subscription). It mirrors the building blocks
 of a "Marveen"-style AI fleet — tiered memory, kanban, a proactive heartbeat,
@@ -94,6 +108,26 @@ All optional keys are documented in `.env.example`. Highlights:
   federation requires a shared token.
 - Codex runs sandboxed per `~/.codex/config.toml` (`read-only` /
   `workspace-write` / `danger-full-access`).
+
+## Köszönet · Credits
+
+**Magyar.** Ez a projekt a [**Marveen**](https://github.com/Szotasz/marveen)
+rendszerre épül, amelyet [**Szotasz**](https://github.com/Szotasz) készített. A
+Marveen ("AI csapatod, ami fut amíg te alszol") egy kiváló, átgondolt,
+mérnökileg igényes multi-agent AI-keretrendszer — az egész ötlet és architektúra,
+amire ez a munka támaszkodik, az ő érdeme. Hálás köszönet Szotasznak a Marveenért
+és azért, hogy nyíltan megosztja. Nézd meg a munkáit:
+
+- Marveen: <https://github.com/Szotasz/marveen>
+- Marveen Marketplace: <https://github.com/Szotasz/marveen-marketplace>
+- Szotasz GitHub: <https://github.com/Szotasz>
+
+**English.** This project builds on [**Marveen**](https://github.com/Szotasz/marveen)
+by [**Szotasz**](https://github.com/Szotasz). Marveen ("your AI team that runs
+while you sleep") is an excellent, thoughtfully engineered multi-agent AI
+framework — the whole idea and architecture this work rests on is his. Huge
+thanks to Szotasz for Marveen and for sharing it openly. Check out his work at
+the links above.
 
 ## License
 
