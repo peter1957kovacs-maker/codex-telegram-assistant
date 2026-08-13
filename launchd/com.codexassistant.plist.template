@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Run the assistant 24/7 on macOS. To install:
+    1. Replace __PROJECT_DIR__ below with the absolute path to this project
+       (e.g. /Users/you/codex-telegram-assistant).
+    2. Copy to ~/Library/LaunchAgents/com.codexassistant.plist
+    3. launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.codexassistant.plist
+  To stop:
+    launchctl bootout gui/$(id -u)/com.codexassistant
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.codexassistant</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__PROJECT_DIR__/bin/assistant.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_DIR__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>__PROJECT_DIR__/store/assistant.log</string>
+    <key>StandardErrorPath</key>
+    <string>__PROJECT_DIR__/store/assistant.log</string>
+</dict>
+</plist>

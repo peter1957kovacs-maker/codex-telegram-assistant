@@ -1,0 +1,13 @@
+# Example ~/.codex/config.toml for headless (bot-driven) operation.
+# Copy the relevant lines into your own ~/.codex/config.toml.
+
+# Do not prompt for approval -- the bot runs unattended.
+approval_policy = "never"
+
+# Sandbox for the agent's own tool actions (shell/file). Choose one:
+#   "read-only"       -- safest: the assistant can read but not modify anything.
+#   "workspace-write" -- can edit files in its working dir (more useful for tasks).
+#   "danger-full-access" -- no sandbox; full read/write. Only if you trust it fully.
+# A pure chat assistant is fine with read-only. Widen it if you want the
+# assistant to actually run tasks on the machine.
+sandbox_mode = "read-only"
