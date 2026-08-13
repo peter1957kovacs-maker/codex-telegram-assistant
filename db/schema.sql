@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS kanban (
   status      TEXT DEFAULT 'planned'  CHECK(status IN ('planned','in_progress','waiting','done')),
   priority    TEXT DEFAULT 'normal'   CHECK(priority IN ('low','normal','high','urgent')),
   agent_id    TEXT,
+  parent_id   INTEGER,                 -- subtask nesting (NULL = top-level)
+  stuck       INTEGER DEFAULT 0,       -- flagged by kanban-audit when in_progress too long
+  archived_at INTEGER,                 -- set by kanban-audit for old done cards (NULL = active)
   created_at  INTEGER DEFAULT (strftime('%s','now')),
   updated_at  INTEGER DEFAULT (strftime('%s','now'))
 );

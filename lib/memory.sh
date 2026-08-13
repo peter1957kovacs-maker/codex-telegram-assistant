@@ -45,7 +45,12 @@ msg_fail()   { local ec; ec=$(sql_escape "$2"); dbq "UPDATE agent_messages SET s
 kanban_add() { # title priority agent
   dbq "INSERT INTO kanban(title,priority,agent_id) VALUES('$(sql_escape "$1")','${2:-normal}','$(sql_escape "$3")');"
 }
-kanban_set() { dbq "UPDATE kanban SET status='$2', updated_at=strftime('%s','now') WHERE id=$1;"; }
+kanban_subtask() { # parent_id title
+  dbq "INSERT INTO kanban(title,parent_id) VALUES('$(sql_escape "$2")',$1);"
+}
+kanban_set()     { dbq "UPDATE kanban SET status='$2', updated_at=strftime('%s','now') WHERE id=$1;"; }
+kanban_archive() { dbq "UPDATE kanban SET archived_at=strftime('%s','now') WHERE id=$1;"; }
+kanban_stuck()   { dbq "UPDATE kanban SET stuck=$2 WHERE id=$1;"; }
 
 # --- daily log ---
 log_add() { local ec; ec=$(sql_escape "$2"); dbq "INSERT INTO daily_log(agent_id,entry) VALUES('$(sql_escape "$1")','$ec');"; }

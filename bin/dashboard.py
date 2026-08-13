@@ -7,7 +7,7 @@ board (add / move), inter-agent messages, and the daily log. Binds to localhost.
 
 Run:  DASHBOARD_PORT=3420 python3 bin/dashboard.py
 """
-import json, os, sqlite3, socketserver, urllib.parse
+import json, os, sqlite3, socketserver, subprocess, urllib.parse
 import http.server
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -99,12 +99,18 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
 });
 const COLS=[['planned','Tervezett'],['in_progress','Folyamatban'],['waiting','Várakozik'],['done','Kész']];
 async function loadK(){const d=await api('/api/kanban');const kb=$('#kb');kb.innerHTML='';
+  const subs=t=>d.filter(x=>x.parent_id===t.id);
   COLS.forEach(([s,label])=>{const c=document.createElement('div');c.className='col';c.innerHTML=`<h3>${label}</h3>`;
-    d.filter(x=>x.status===s).forEach(t=>{const nx=COLS[(COLS.findIndex(z=>z[0]===s)+1)%4][0];
-      c.innerHTML+=`<div class="kc"><div class="t">${esc(t.title)}</div><div class="row" style="margin-top:6px"><span class="pri ${t.priority}">${t.priority}</span><button class="tag" onclick="moveK(${t.id},'${nx}')">→ ${nx}</button></div></div>`;});
+    d.filter(x=>x.status===s && !x.parent_id).forEach(t=>{const nx=COLS[(COLS.findIndex(z=>z[0]===s)+1)%4][0];
+      const sub=subs(t).map(st=>`<div class="muted" style="font-size:12px;margin-top:3px">• ${esc(st.title)} <span class="tag">${st.status}</span></div>`).join('');
+      c.innerHTML+=`<div class="kc"><div class="t">${t.stuck?'⚠️ ':''}${esc(t.title)}</div>
+        <div class="row" style="margin-top:6px"><span class="pri ${t.priority}">${t.priority}</span>
+        <button class="tag" onclick="moveK(${t.id},'${nx}')">→ ${nx}</button>
+        <button class="tag" onclick="breakK(${t.id})">⚙︎ bontás</button></div>${sub}</div>`;});
     kb.appendChild(c);});}
 async function addK(){const t=$('#kt').value.trim();if(!t)return;await api('/api/kanban/add',{method:'POST',body:new URLSearchParams({title:t,priority:$('#kp').value})});$('#kt').value='';loadK();}
 async function moveK(id,st){await api('/api/kanban/move',{method:'POST',body:new URLSearchParams({id,status:st})});loadK();}
+async function breakK(id){await api('/api/kanban/breakdown',{method:'POST',body:new URLSearchParams({id})});setTimeout(loadK,6000);}
 async function loadMem(){const term=$('#ms').value.trim();const d=await api('/api/memories'+(term?('?q='+encodeURIComponent(term)):''));
   $('#memt').querySelector('tbody').innerHTML=d.map(m=>`<tr><td><span class="tag">${m.category}</span></td><td>${esc(m.content)}</td><td class="muted">${esc(m.keywords||'')}<br>${ts(m.created_at)}</td></tr>`).join('');}
 async function addMem(){const c=$('#mtext').value.trim();if(!c)return;await api('/api/memory/add',{method:'POST',body:new URLSearchParams({content:c,category:$('#mc').value})});$('#mtext').value='';loadMem();}
@@ -146,7 +152,7 @@ class H(http.server.BaseHTTPRequestHandler):
                     rows = q("SELECT * FROM memories ORDER BY id DESC LIMIT 200")
                 return self._send(200, json.dumps(rows))
             if u.path == "/api/kanban":
-                return self._send(200, json.dumps(q("SELECT * FROM kanban ORDER BY updated_at DESC")))
+                return self._send(200, json.dumps(q("SELECT * FROM kanban WHERE archived_at IS NULL ORDER BY COALESCE(parent_id,id), parent_id IS NOT NULL, updated_at DESC")))
             if u.path == "/api/messages":
                 return self._send(200, json.dumps(q("SELECT * FROM agent_messages ORDER BY id DESC LIMIT 100")))
             if u.path == "/api/daily_log":
@@ -168,6 +174,13 @@ class H(http.server.BaseHTTPRequestHandler):
             if u.path == "/api/kanban/move":
                 q("UPDATE kanban SET status=?, updated_at=strftime('%s','now') WHERE id=?", (g("status", "planned"), g("id", "0")))
                 return self._send(200, json.dumps({"ok": True}))
+            if u.path == "/api/kanban/breakdown":
+                cid = g("id", "")
+                if cid:
+                    env = dict(os.environ, DB=DB)
+                    subprocess.Popen(["bash", os.path.join(ROOT, "bin", "kanban-breakdown.sh"), cid],
+                                     env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return self._send(200, json.dumps({"ok": True, "note": "breakdown running; refresh in a few seconds"}))
             if u.path == "/api/memory/add":
                 if g("content"):
                     q("INSERT INTO memories(agent_id,content,category,keywords) VALUES(?,?,?,?)",
