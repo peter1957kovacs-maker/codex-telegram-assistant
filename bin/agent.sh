@@ -34,19 +34,24 @@ while true; do
     msg_claim "$mid"
     log "processing msg #$mid from $from"
 
+    # Long-term memory + the bounded conversation window (so the agent remembers
+    # its thread, not just its facts). codex exec is stateless per call.
     mem="$(mem_recent "$SELF" 8)"
-    prompt="Beerkezett uzenet tole: ${from}.
-Uzenet:
-${content}
+    chat_save "$SELF" user "[$from] $content"
+    win="$(chat_window "$SELF")"
+    prompt="Ez a beszelgeteseid eddigi menete (a memoriad). A LEGUTOLSO uzenet tole: ${from}. Vegezd el a feladatot / valaszolj ra, a korabbi kontextust figyelembe veve. A valaszod lesz a vegso uzenet.
 
-A memoriad (kontextus, lehet ures):
+Hosszutavu memoria (relevans tenyek):
 ${mem}
 
-Vegezd el a feladatot vagy valaszolj. A valaszod lesz a vegso uzenet, azt kapja vissza a felado."
+--- beszelgetes ---
+${win}
+--- vege ---"
 
     out="$(mktemp)"
     if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check -o "$out" ) >/dev/null 2>&1; then
       reply="$(cat "$out")"; [ -z "$reply" ] && reply="(ures valasz)"
+      chat_save "$SELF" assistant "$reply"
       msg_done "$mid" "$reply"
       # Reply back to the sender so conversations flow (main relays to Telegram).
       msg_send "$SELF" "$from" "$reply"
