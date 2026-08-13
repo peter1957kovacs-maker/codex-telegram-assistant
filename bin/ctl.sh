@@ -32,6 +32,8 @@ case "${1:-status}" in
     done
     # Dashboard needs no Telegram.
     start_one dashboard python3 "$ROOT/bin/dashboard.py"
+    # Scheduler: dream engine, morning briefing, kanban audit.
+    start_one scheduler bash "$ROOT/bin/scheduler.sh"
     # Telegram bridge + heartbeat need .env (token + user id).
     if [ -f "$ROOT/.env" ]; then
       start_one bridge    bash "$ROOT/bin/telegram-bridge.sh"
