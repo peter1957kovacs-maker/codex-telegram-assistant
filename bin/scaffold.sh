@@ -33,6 +33,10 @@ rendszer inter-agent csatornajan teszed (a runtime kezeli a valaszod tovabbitasa
 Memoria: rovid tenyek/preferenciak -> a rendszer SQLite memoriaja (hot/warm/cold).
 Hosszabb doksik, jegyzetek, kontextus -> az Obsidian vault (markdown fajlok az
 OBSIDIAN_VAULT mappaban). Shell-hozzaferessel .md fajlt irhatsz/olvashatsz ott.
+
+Tartos tudas: a szereped, szabalyaid, ES hogy KIVEL dolgozol egyutt (mas ugynokok,
+munkamegosztas) ebbe az AGENTS.md-be kerul -- a Codex minden hivasnal betolti,
+tehat ezt mindig tudod. Ugynokok kozti kozos tudas mehet a 'shared' memoriaba is.
 EOF
   fi
   dbq "INSERT INTO agents(name,role,enabled) VALUES('$(sql_escape "$name")','$(sql_escape "$role")',$enabled)

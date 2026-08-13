@@ -98,6 +98,10 @@ All optional keys are documented in `.env.example`. Highlights:
 
 - **Agents:** `config/agents.json` (re-run `bin/scaffold.sh` after edits); each
   agent's persona is `agents/<name>/AGENTS.md`.
+- **Durable / cross-agent knowledge → `AGENTS.md`.** What an agent must always
+  know — its role, rules, and **which other agents it collaborates with** — goes
+  in its `AGENTS.md` (loaded every call), not just the rolling conversation
+  window. Shared facts across agents can also go in the `shared` memory tier.
 - **Secrets:** `bin/vault.sh set ID VALUE`, then use `vault:ID` in configs.
 
 ## Security
