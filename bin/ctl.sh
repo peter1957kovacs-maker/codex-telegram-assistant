@@ -24,6 +24,8 @@ start_one() { # name cmd...
 case "${1:-status}" in
   start)
     echo "Initializing..."
+    # Load .env so DASHBOARD_PORT / OBSIDIAN_VAULT / schedule vars reach children.
+    [ -f "$ROOT/.env" ] && { set -a; . "$ROOT/.env"; set +a; }
     db_init
     bash "$ROOT/bin/scaffold.sh" >/dev/null 2>&1 || true
     # Sub-agents (enabled, not main) run the generic runtime.

@@ -13,6 +13,24 @@ import http.server
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB = os.environ.get("DB", os.path.join(ROOT, "store", "system.db"))
 PORT = int(os.environ.get("DASHBOARD_PORT", "3420"))
+VAULT = os.environ.get("OBSIDIAN_VAULT", os.path.join(ROOT, "store", "vault"))
+
+
+def vault_list():
+    try:
+        return sorted(f[:-3] for f in os.listdir(VAULT) if f.endswith(".md"))
+    except FileNotFoundError:
+        return []
+
+
+def vault_read(name):
+    # path-safe: strip separators, only read a .md inside VAULT
+    safe = os.path.basename(name).replace("/", "").replace("..", "")
+    p = os.path.join(VAULT, safe + ".md")
+    if os.path.isfile(p):
+        with open(p, encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    return ""
 
 
 def q(sql, args=()):
@@ -60,6 +78,7 @@ HTML = r"""<!doctype html>
     <button data-t="memory">Memória</button>
     <button data-t="agents">Ügynökök</button>
     <button data-t="messages">Üzenetek</button>
+    <button data-t="vault">Obsidian</button>
     <button data-t="log">Napló</button>
   </nav>
   <span class="muted" id="clock" style="margin-left:auto"></span>
@@ -86,6 +105,10 @@ HTML = r"""<!doctype html>
 
   <section id="agents" class="hide"><div class="card"><table id="agt"><thead><tr><th>Ügynök</th><th>Szerep</th><th>Állapot</th></tr></thead><tbody></tbody></table></div></section>
   <section id="messages" class="hide"><div class="card"><table id="msgt"><thead><tr><th>#</th><th>Kitől</th><th>Kinek</th><th>Állapot</th><th>Tartalom</th></tr></thead><tbody></tbody></table></div></section>
+  <section id="vault" class="hide"><div class="row" style="align-items:flex-start;gap:12px">
+    <div class="card" style="min-width:200px"><h3 style="margin-top:0;font-size:13px;color:var(--muted)">Jegyzetek</h3><div id="vlist"></div></div>
+    <div class="card" style="flex:1"><pre id="vbody" style="white-space:pre-wrap;font:inherit;margin:0">Válassz egy jegyzetet…</pre></div>
+  </div></section>
   <section id="log" class="hide"><div class="card"><table id="logt"><tbody></tbody></table></div></section>
 </main>
 <script>
@@ -94,7 +117,7 @@ function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':
 function ts(x){return x?new Date(x*1000).toLocaleString('hu-HU'):''}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active');
-  ['kanban','memory','agents','messages','log'].forEach(id=>$('#'+id).classList.toggle('hide',id!==b.dataset.t));
+  ['kanban','memory','agents','messages','vault','log'].forEach(id=>$('#'+id).classList.toggle('hide',id!==b.dataset.t));
   load(b.dataset.t);
 });
 const COLS=[['planned','Tervezett'],['in_progress','Folyamatban'],['waiting','Várakozik'],['done','Kész']];
@@ -117,7 +140,9 @@ async function addMem(){const c=$('#mtext').value.trim();if(!c)return;await api(
 async function loadAgents(){const d=await api('/api/agents');$('#agt').querySelector('tbody').innerHTML=d.map(a=>`<tr><td><b>${esc(a.name)}</b></td><td>${esc(a.role||'')}</td><td>${a.enabled?'🟢 aktív':'⚪ tiltva'}</td></tr>`).join('');}
 async function loadMsg(){const d=await api('/api/messages');$('#msgt').querySelector('tbody').innerHTML=d.map(m=>`<tr><td>${m.id}</td><td>${esc(m.from_agent)}</td><td>${esc(m.to_agent)}</td><td><span class="tag">${m.status}</span></td><td>${esc((m.content||'').slice(0,120))}</td></tr>`).join('');}
 async function loadLog(){const d=await api('/api/daily_log');$('#logt').querySelector('tbody').innerHTML=d.map(x=>`<tr><td class="muted" style="white-space:nowrap">${ts(x.created_at)}</td><td>${esc(x.entry)}</td></tr>`).join('');}
-function load(t){({kanban:loadK,memory:loadMem,agents:loadAgents,messages:loadMsg,log:loadLog}[t]||loadK)();}
+async function loadVault(){const d=await api('/api/vault');$('#vlist').innerHTML=d.length?d.map(n=>`<div class="kc" style="cursor:pointer" onclick="openNote('${encodeURIComponent(n)}')">${esc(n)}</div>`).join(''):'<span class="muted">Üres vault</span>';}
+async function openNote(n){const d=await api('/api/vault/read?f='+n);$('#vbody').textContent=d.content||'(üres)';}
+function load(t){({kanban:loadK,memory:loadMem,agents:loadAgents,messages:loadMsg,vault:loadVault,log:loadLog}[t]||loadK)();}
 setInterval(()=>$('#clock').textContent=new Date().toLocaleTimeString('hu-HU'),1000);
 load('kanban');
 </script></body></html>"""
@@ -157,6 +182,11 @@ class H(http.server.BaseHTTPRequestHandler):
                 return self._send(200, json.dumps(q("SELECT * FROM agent_messages ORDER BY id DESC LIMIT 100")))
             if u.path == "/api/daily_log":
                 return self._send(200, json.dumps(q("SELECT * FROM daily_log ORDER BY id DESC LIMIT 100")))
+            if u.path == "/api/vault":
+                return self._send(200, json.dumps(vault_list()))
+            if u.path == "/api/vault/read":
+                name = urllib.parse.parse_qs(u.query).get("f", [""])[0]
+                return self._send(200, json.dumps({"name": name, "content": vault_read(name)}))
         except Exception as e:
             return self._send(500, json.dumps({"error": str(e)}))
         return self._send(404, json.dumps({"error": "not found"}))

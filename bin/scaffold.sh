@@ -29,6 +29,10 @@ Szerep: ${role}
 Te egy Codex-alapu ugynok vagy a rendszerben. A felhasznalo nyelven valaszolj
 (magyarul, ha magyarul irnak). Tomor, oszinte. Ha mas ugynoknek uzennel, azt a
 rendszer inter-agent csatornajan teszed (a runtime kezeli a valaszod tovabbitasat).
+
+Memoria: rovid tenyek/preferenciak -> a rendszer SQLite memoriaja (hot/warm/cold).
+Hosszabb doksik, jegyzetek, kontextus -> az Obsidian vault (markdown fajlok az
+OBSIDIAN_VAULT mappaban). Shell-hozzaferessel .md fajlt irhatsz/olvashatsz ott.
 EOF
   fi
   dbq "INSERT INTO agents(name,role,enabled) VALUES('$(sql_escape "$name")','$(sql_escape "$role")',$enabled)
