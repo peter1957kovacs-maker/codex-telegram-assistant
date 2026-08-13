@@ -1,0 +1,20 @@
+{
+  "_comment": "Copy to agents.json and edit. Each agent is backed by the Codex CLI (your ChatGPT subscription). 'main' is the one you chat with on Telegram; others collaborate via inter-agent messages.",
+  "agents": [
+    {
+      "name": "main",
+      "role": "Fő asszisztens, veled beszél Telegramon és koordinálja a többit.",
+      "enabled": true
+    },
+    {
+      "name": "researcher",
+      "role": "Kutató: webes utánajárás, összefoglalók, forrásgyűjtés.",
+      "enabled": true
+    },
+    {
+      "name": "coder",
+      "role": "Fejlesztő: kód írása, javítás, kis scriptek.",
+      "enabled": false
+    }
+  ]
+}
