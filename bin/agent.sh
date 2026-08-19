@@ -31,26 +31,35 @@ extract_image_paths() { # <content> -> one existing image path per line
     | sort -u
 }
 
-while true; do
-  if ! "$CODEX" login status >/dev/null 2>&1; then
-    log "codex auth pending -- idling (run: codex login)"; sleep 30; continue
+# --- batching --------------------------------------------------------------
+# Several queued messages from the SAME sender usually belong together (a task
+# split across messages, a forwarded run). One codex exec per row gives
+# disconnected answers, so consecutive rows from one sender are merged into ONE
+# call and ONE reply -- the same behaviour the Telegram bridge has.
+GIDS=(); GTEXTS=(); GFROM=""
+
+flush_group() {
+  [ ${#GIDS[@]} -eq 0 ] && return 0
+  local n=${#GIDS[@]} merged i t mid reply out
+  if [ "$n" -eq 1 ]; then
+    merged="${GTEXTS[0]}"
+  else
+    merged="(${GFROM} $n uzenetben irta le ugyanezt az egy dolgot, egyben kezeld, egy valaszt adj ra:)"
+    i=1
+    for t in "${GTEXTS[@]}"; do
+      merged="$merged
+[$i] $t"
+      i=$((i+1))
+    done
   fi
+  log "processing $n msg(s) from $GFROM (ids: ${GIDS[*]})"
 
-  rows="$(msg_pending "$SELF")"
-  [ -z "$rows" ] && { sleep "$POLL"; continue; }
-
-  while IFS='|' read -r mid from; do
-    [ -z "$mid" ] && continue
-    content="$(dbq "SELECT content FROM agent_messages WHERE id=$mid;")"
-    msg_claim "$mid"
-    log "processing msg #$mid from $from"
-
-    # Long-term memory + the bounded conversation window (so the agent remembers
-    # its thread, not just its facts). codex exec is stateless per call.
-    mem="$(mem_recent "$SELF" 8)"
-    chat_save "$SELF" user "[$from] $content"
-    win="$(chat_window "$SELF")"
-    prompt="Ez a beszelgeteseid eddigi menete (a memoriad). A LEGUTOLSO uzenet tole: ${from}. Vegezd el a feladatot / valaszolj ra, a korabbi kontextust figyelembe veve. A valaszod lesz a vegso uzenet.
+  # Long-term memory + the bounded conversation window (so the agent remembers
+  # its thread, not just its facts). codex exec is stateless per call.
+  mem="$(mem_recent "$SELF" 8)"
+  chat_save "$SELF" user "[$GFROM] $merged"
+  win="$(chat_window "$SELF")"
+  prompt="Ez a beszelgeteseid eddigi menete (a memoriad). A LEGUTOLSO uzenet tole: ${GFROM}. Vegezd el a feladatot / valaszolj ra, a korabbi kontextust figyelembe veve. A valaszod lesz a vegso uzenet.
 
 Hosszutavu memoria (relevans tenyek):
 ${mem}
@@ -59,32 +68,58 @@ ${mem}
 ${win}
 --- vege ---"
 
-    # Attach any image the sender referenced by path (empty-array safe for set -u).
-    IMG_ARGS=()
-    while IFS= read -r imgp; do
-      [ -n "$imgp" ] || continue
-      IMG_ARGS+=(-i "$imgp"); log "attaching image: $imgp"
-    done < <(extract_image_paths "$content")
+  # Attach every image referenced by path across the whole group
+  # (empty-array safe expansion for bash 3.2 + set -u).
+  IMG_ARGS=()
+  while IFS= read -r imgp; do
+    [ -n "$imgp" ] || continue
+    IMG_ARGS+=(-i "$imgp"); log "attaching image: $imgp"
+  done < <(extract_image_paths "$merged")
 
-    out="$(mktemp)"
-    if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} ${IMG_ARGS[@]+"${IMG_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
-      reply="$(cat "$out")"; [ -z "$reply" ] && reply="(ures valasz)"
-      chat_save "$SELF" assistant "$reply"
-      msg_done "$mid" "$reply"
-      # Reply back to the sender so conversations flow (main relays to Telegram) --
-      # but ONLY if the sender is a real agent. Cron jobs, scripts and external
-      # feeders can also write to this queue; answering them posts a message
-      # nobody reads and can bounce between runtimes.
-      if [ -n "$(dbq "SELECT 1 FROM agents WHERE name='$(sql_escape "$from")' LIMIT 1;")" ]; then
-        msg_send "$SELF" "$from" "$reply"
-        log "msg #$mid done -> replied to $from"
-      else
-        log "msg #$mid done -> no reply ('$from' is not a registered agent)"
-      fi
+  out="$(mktemp)"
+  if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} ${IMG_ARGS[@]+"${IMG_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
+    reply="$(cat "$out")"; [ -z "$reply" ] && reply="(ures valasz)"
+    chat_save "$SELF" assistant "$reply"
+    for mid in "${GIDS[@]}"; do msg_done "$mid" "$reply"; done
+    # Reply back to the sender so conversations flow (main relays to Telegram) --
+    # but ONLY if the sender is a real agent. Cron jobs, scripts and external
+    # feeders can also write to this queue; answering them posts a message
+    # nobody reads and can bounce between runtimes. ONE reply per group.
+    if [ -n "$(dbq "SELECT 1 FROM agents WHERE name='$(sql_escape "$GFROM")' LIMIT 1;")" ]; then
+      msg_send "$SELF" "$GFROM" "$reply"
+      log "ids ${GIDS[*]} done -> one reply to $GFROM"
     else
-      msg_fail "$mid" "codex exec failed"
-      log "msg #$mid FAILED"
+      log "ids ${GIDS[*]} done -> no reply ('$GFROM' is not a registered agent)"
     fi
-    rm -f "$out"
+  else
+    for mid in "${GIDS[@]}"; do msg_fail "$mid" "codex exec failed"; done
+    log "ids ${GIDS[*]} FAILED"
+  fi
+  rm -f "$out"
+  GIDS=(); GTEXTS=(); GFROM=""
+}
+
+while true; do
+  if ! "$CODEX" login status >/dev/null 2>&1; then
+    log "codex auth pending -- idling (run: codex login)"; sleep 30; continue
+  fi
+
+  rows="$(msg_pending "$SELF")"
+  [ -z "$rows" ] && { sleep "$POLL"; continue; }
+
+  GIDS=(); GTEXTS=(); GFROM=""
+  while IFS='|' read -r mid from; do
+    [ -z "$mid" ] && continue
+    content="$(dbq "SELECT content FROM agent_messages WHERE id=$mid;")"
+    msg_claim "$mid"
+    # A different sender starts a new group: answer the previous one first, so
+    # nobody gets an answer that mixes two conversations.
+    if [ -n "$GFROM" ] && [ "$from" != "$GFROM" ]; then
+      flush_group
+    fi
+    GFROM="$from"
+    GIDS+=("$mid")
+    GTEXTS+=("$content")
   done <<< "$rows"
+  flush_group
 done
