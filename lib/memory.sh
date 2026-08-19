@@ -19,6 +19,63 @@ mem_search() { # agent term  -- FTS5 ranked, with a LIKE fallback
     || dbq "SELECT category||' | '||content FROM memories WHERE agent_id='$ea' AND (content LIKE '%$rt%' OR keywords LIKE '%$rt%') ORDER BY id DESC LIMIT 20;"
 }
 
+# --- durable memory in the prompt, and a write path the model can use --------
+# The chat window only carries the last N turns, so without this the agent cannot
+# "come back to it later": anything older is gone. Every call therefore gets a
+# compact block of durable memories (recent tiers + hits on the current topic),
+# and the agent can WRITE one by emitting a `MEMORY: <tier> | <fact>` line, which
+# mem_harvest lifts out of the reply and stores. codex exec is one-shot: an
+# instruction it can follow with plain text beats hoping it makes a tool call.
+MEM_ITEM_MAX="${MEM_ITEM_MAX:-300}"     # per item: a few long entries would
+                                        # otherwise fill the block alone
+MEM_LT_MAX_CHARS="${MEM_LT_MAX_CHARS:-6000}"   # the whole block
+
+mem_context() { # agent current_text -> "- [tier] fact" lines
+  local a="$1" txt="$2" out kw w
+  out="$(dbq "SELECT '- [' || category || '] ' || substr(REPLACE(content, char(10), ' '), 1, $MEM_ITEM_MAX)
+                     || CASE WHEN length(content) > $MEM_ITEM_MAX THEN ' [...]' ELSE '' END
+              FROM memories WHERE agent_id='$(sql_escape "$a")'
+                AND category IN ('hot','warm','shared') ORDER BY id DESC LIMIT 12;")"
+  # Topical hits, so an old cold memory can surface when the subject returns.
+  kw="$(printf '%s' "$txt" | tr '[:upper:]' '[:lower:]' | tr -cs '[:alnum:]' '\n' \
+        | awk 'length($0)>5' | sort -u | head -6)"
+  while IFS= read -r w; do
+    [ -n "$w" ] || continue
+    out="$out
+$(dbq "SELECT '- [' || category || '] ' || substr(REPLACE(content, char(10), ' '), 1, $MEM_ITEM_MAX)
+              || CASE WHEN length(content) > $MEM_ITEM_MAX THEN ' [...]' ELSE '' END
+       FROM memories WHERE agent_id='$(sql_escape "$a")' AND category='cold'
+         AND lower(content) LIKE '%$(sql_escape "$w")%' ORDER BY id DESC LIMIT 2;")"
+  done <<< "$kw"
+  out="$(printf '%s' "$out" | grep -v '^$' | awk '!seen[$0]++')"
+  [ ${#out} -gt "$MEM_LT_MAX_CHARS" ] && out="${out:0:$MEM_LT_MAX_CHARS}
+[... the durable list is cut here ...]"
+  printf '%s' "$out"
+}
+
+mem_harvest() { # agent reply -> reply without the MEMORY lines (saves as a side effect)
+  local a="$1" reply="$2" line tier fact
+  while IFS= read -r line; do
+    case "$line" in
+      MEMORY:*|memory:*)
+        tier="$(printf '%s' "$line" | sed -E 's/^[Mm][Ee][Mm][Oo][Rr][Yy]:[[:space:]]*([a-zA-Z]+)[[:space:]]*\|.*/\1/' | tr '[:upper:]' '[:lower:]')"
+        fact="$(printf '%s' "$line" | sed -E 's/^[Mm][Ee][Mm][Oo][Rr][Yy]:[^|]*\|[[:space:]]*//')"
+        case "$tier" in hot|warm|cold|shared) : ;; *) tier="warm" ;; esac
+        [ ${#fact} -lt 8 ] && continue
+        mem_save "$a" "$tier" "" "$fact"
+        echo "[$(date '+%Y-%m-%dT%H:%M:%S')] [memory] durable memory saved (tier=$tier, ${#fact} chars)" >&2
+        ;;
+    esac
+  done <<< "$reply"
+  printf '%s' "$reply" | grep -v -E '^[[:space:]]*[Mm][Ee][Mm][Oo][Rr][Yy]:'
+}
+
+MEM_INSTRUCTION="Ha a beszelgetesben olyan TARTOS teny, dontes vagy tanulsag szuletik, amit a rovid ablakon TUL is tudnod kell, akkor a valaszod VEGERE tegyel egy-egy sort:
+MEMORY: hot | <amin most dolgozunk, aktiv feladat>
+MEMORY: warm | <stabil konfig, preferencia, projekt-kontextus>
+MEMORY: cold | <hosszutavu tanulsag, lezart dontes>
+Egy sor egy teny, onmagaban is ertelmes megfogalmazassal. Ezek a sorok NEM jutnak el a felhasznalohoz, a rendszer kimenti oket. Ha nincs ilyen teny, ne irj MEMORY sort."
+
 # --- chat window (bounded conversation memory) ---
 chat_save() { # agent role content
   local ec; ec=$(sql_escape "$3")

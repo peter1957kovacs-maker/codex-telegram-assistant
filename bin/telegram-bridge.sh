@@ -221,7 +221,7 @@ Az uzenethez ${#BATCH_IMGS[@]} KEP is tartozik, csatolva kapod. Nezd meg, es azo
   chat_save "$SELF" user "$merged"
   # Reserve room for the new turn plus the fixed prompt frame (~800 chars).
   win="$(fit_window "$SELF" "$CONTEXT_TURNS" $((${#merged} + 800)))"
-  mem="$(mem_recent "$SELF" 8)"
+  mem="$(mem_context "$SELF" "$merged")"
   prompt="Ez a beszelgetes eddigi menete (memoria-ablak). Valaszolj a LEGUTOLSO 'user' uzenetre termeszetesen, a kontextust figyelembe veve. Ha mas ugynoknek kell delegalnod, azt a rendszer inter-agent csatornajan teszed.${img_note}
 
 Hosszutavu memoria (relevans tenyek):
@@ -229,11 +229,13 @@ ${mem}
 
 --- beszelgetes ---
 ${win}
---- vege ---"
+--- vege ---
+
+${MEM_INSTRUCTION}"
 
   out="$(mktemp)"
   if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} ${IMG_ARGS[@]+"${IMG_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
-    reply="$(cat "$out")"; [ -z "$reply" ] && reply="(ures valasz)"
+    reply="$(mem_harvest "$SELF" "$(cat "$out")")"; [ -z "$reply" ] && reply="(ures valasz)"
   else
     reply="[hiba: a Codex most nem tudott valaszolni. Probald ujra.]"
   fi

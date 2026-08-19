@@ -168,6 +168,30 @@ Note for hackers: `poll_updates` runs inside `$(...)`, i.e. a subshell, so
 anything it assigns is lost. Per-call state belongs in a file; the offset and the
 batch buffers are mutated by `collect`, which is called directly.
 
+## Durable memory · Tartós memória
+
+The conversation window is short-term by design, so the tiered memory is what lets
+an agent come back to a topic later. Two halves:
+
+**Read** — `mem_context <agent> <current_text>` builds the block fed into every
+prompt: the last 12 `hot`/`warm`/`shared` rows plus `cold` rows matching longer
+words from the current turn, each item capped at `MEM_ITEM_MAX` (300) and the block
+at `MEM_LT_MAX_CHARS` (6000). The per-item cap matters: a few long entries (a daily
+log is ~2000 chars) would otherwise fill the block alone.
+
+**Write** — the agent ends its reply with
+
+```
+MEMORY: hot | what we are working on right now
+MEMORY: warm | stable config, preference, project context
+MEMORY: cold | long-term lesson, closed decision
+```
+
+`mem_harvest` stores those lines and **strips them from the reply**, so they never
+reach Telegram. Unknown tier falls back to `warm`; facts under 8 characters are
+ignored. `codex exec` is one-shot, so an instruction it can satisfy in plain text
+beats hoping it calls a tool.
+
 ## Context budget · Prompt-költségvetés
 
 Codex's working context is smaller than a Claude Code session's, and every call

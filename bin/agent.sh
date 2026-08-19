@@ -56,7 +56,7 @@ flush_group() {
 
   # Long-term memory + the bounded conversation window (so the agent remembers
   # its thread, not just its facts). codex exec is stateless per call.
-  mem="$(mem_recent "$SELF" 8)"
+  mem="$(mem_context "$SELF" "$merged")"
   merged="$(cap_batch "$merged")"
   chat_save "$SELF" user "[$GFROM] $merged"
   # Reserve room for the new turn plus the fixed prompt frame (~800 chars).
@@ -68,7 +68,9 @@ ${mem}
 
 --- beszelgetes ---
 ${win}
---- vege ---"
+--- vege ---
+
+${MEM_INSTRUCTION}"
 
   # Attach every image referenced by path across the whole group
   # (empty-array safe expansion for bash 3.2 + set -u).
@@ -80,7 +82,7 @@ ${win}
 
   out="$(mktemp)"
   if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} ${IMG_ARGS[@]+"${IMG_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
-    reply="$(cat "$out")"; [ -z "$reply" ] && reply="(ures valasz)"
+    reply="$(mem_harvest "$SELF" "$(cat "$out")")"; [ -z "$reply" ] && reply="(ures valasz)"
     chat_save "$SELF" assistant "$reply"
     for mid in "${GIDS[@]}"; do msg_done "$mid" "$reply"; done
     # Reply back to the sender so conversations flow (main relays to Telegram) --
