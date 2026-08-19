@@ -21,6 +21,16 @@ db_init
 log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S')] [$SELF] $*"; }
 log "runtime started (dir: $AGENT_DIR)"
 
+# Inter-agent messages are text only, so an image can only travel as a PATH.
+# Pull out absolute paths to existing image files and attach them with -i;
+# without this the agent gets the file name but never the pixels.
+extract_image_paths() { # <content> -> one existing image path per line
+  printf '%s' "$1" \
+    | grep -oE '/[^[:space:]"'"'"']+\.(jpg|jpeg|png|gif|webp|JPG|JPEG|PNG|GIF|WEBP)' \
+    | while IFS= read -r p; do [ -f "$p" ] && printf '%s\n' "$p"; done \
+    | sort -u
+}
+
 while true; do
   if ! "$CODEX" login status >/dev/null 2>&1; then
     log "codex auth pending -- idling (run: codex login)"; sleep 30; continue
@@ -49,8 +59,15 @@ ${mem}
 ${win}
 --- vege ---"
 
+    # Attach any image the sender referenced by path (empty-array safe for set -u).
+    IMG_ARGS=()
+    while IFS= read -r imgp; do
+      [ -n "$imgp" ] || continue
+      IMG_ARGS+=(-i "$imgp"); log "attaching image: $imgp"
+    done < <(extract_image_paths "$content")
+
     out="$(mktemp)"
-    if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
+    if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} ${IMG_ARGS[@]+"${IMG_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
       reply="$(cat "$out")"; [ -z "$reply" ] && reply="(ures valasz)"
       chat_save "$SELF" assistant "$reply"
       msg_done "$mid" "$reply"

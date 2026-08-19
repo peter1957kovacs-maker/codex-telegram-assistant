@@ -44,6 +44,8 @@ multi-channel, and has a dashboard.
 - **Multi-channel** outbound (Telegram + Slack + Discord webhooks); two-way on Telegram.
 - **Voice** — transcribes Telegram voice messages (Whisper) and can reply with
   speech (`say`/`espeak`), fully local.
+- **Images** — send a photo on Telegram and the model actually sees it
+  (`codex exec -i`); images also travel between agents as paths. See *Images* below.
 - **Encrypted secret vault** (AES-256, Keychain-backed) with `vault:ID` refs.
 - **Federation** — link multiple instances over HTTP.
 
@@ -141,6 +143,31 @@ A feladat így is lefut, csak a válasz marad el, és a napló megmondja miért.
 table). Cron jobs, scripts and external feeders can also write to the queue;
 answering those posts a message nobody reads and can bounce between runtimes. The
 work still runs — only the reply is skipped, and the log says why.
+
+## Images · Képek
+
+Send a photo on Telegram and `main` sees it: the bridge downloads the bytes and
+attaches them with `codex exec -i <FILE>`. Two non-obvious things make this work.
+
+1. **A Telegram photo has no `text` field.** It carries `photo[]` plus an optional
+   `caption`. A bridge that reads only `message.text` gets an empty string and
+   drops the update — before it logs anything, so the failure is completely silent
+   and looks like "the model ignores images". The bridge now reads `caption`, takes
+   the **largest** `photo[]` size (or an `image/*` `document`, which is Telegram's
+   "send as file" at full quality), downloads via `getFile` into
+   `agents/<name>/inbox/`, and passes the path to `-i`. A caption-less photo still
+   works: it gets a default instruction ("describe what you see").
+2. **Inter-agent messages are text only**, so an image travels between agents as a
+   **path**. `bin/agent.sh` scans each message for absolute paths to existing image
+   files and attaches them with `-i` — otherwise the receiving agent only sees a
+   file name and will confidently answer about an image it never got.
+
+A `file_id` is worthless to the model: Codex reads images from disk, so the bytes
+must land there first. Verified end to end on both paths.
+
+Bash note (macOS bash 3.2 + `set -u`): expand optional arg arrays as
+`${IMG_ARGS[@]+"${IMG_ARGS[@]}"}`, never `"${IMG_ARGS[@]}"` — the latter aborts the
+script whenever there is no image.
 
 ## Security
 

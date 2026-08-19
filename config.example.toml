@@ -11,3 +11,14 @@ approval_policy = "never"
 # A pure chat assistant is fine with read-only. Widen it if you want the
 # assistant to actually run tasks on the machine.
 sandbox_mode = "read-only"
+
+# Network access for the agent's own tool calls. Needed if you widen the sandbox
+# to workspace-write AND want the agent to reach the dashboard or the internet.
+# [sandbox_workspace_write]
+# network_access = true
+
+# Mark the install dir as trusted. Recent Codex CLI versions treat an unknown
+# folder as untrusted, which is fine interactively (it asks) but wrong headless:
+# there is nobody to answer. Replace the path with your own install dir.
+# [projects."/Users/YOU/codex-telegram-assistant"]
+# trust_level = "trusted"
