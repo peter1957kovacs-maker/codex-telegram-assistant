@@ -168,6 +168,23 @@ Note for hackers: `poll_updates` runs inside `$(...)`, i.e. a subshell, so
 anything it assigns is lost. Per-call state belongs in a file; the offset and the
 batch buffers are mutated by `collect`, which is called directly.
 
+## Context budget · Prompt-költségvetés
+
+Codex's working context is smaller than a Claude Code session's, and every call
+rebuilds the prompt from scratch: long-term memory + conversation window + the
+whole (batched) new turn. So the size is bounded explicitly, in `lib/memory.sh`:
+
+- `PROMPT_MAX_CHARS` (default 40000, roughly 10-12k tokens) caps window + turn.
+- **The new messages always survive**; the window is what gets trimmed
+  (12 -> 8 -> 6 -> 4 -> 2 -> 1 turns) until it fits (`fit_window`).
+- A merged batch over two thirds of the budget keeps its head and tail
+  (`cap_batch`) -- the request and the conclusion usually live there.
+- **Every cut is announced inside the prompt**, not only in the log: a silently
+  shortened prompt makes the model answer confidently about material it never
+  received. (First version cut the "middle is missing" marker itself, and the
+  agent then reported no truncation at all.)
+- `fit_window` logs to **stderr**, because its stdout IS the window.
+
 ## Images · Képek
 
 Send a photo on Telegram and `main` sees it: the bridge downloads the bytes and

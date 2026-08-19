@@ -217,8 +217,10 @@ Az uzenethez ${#BATCH_IMGS[@]} KEP is tartozik, csatolva kapod. Nezd meg, es azo
 (csatolt kepek: ${BATCH_IMGS[*]})"
   fi
 
+  merged="$(cap_batch "$merged")"
   chat_save "$SELF" user "$merged"
-  win="$(chat_window "$SELF" "$CONTEXT_TURNS")"
+  # Reserve room for the new turn plus the fixed prompt frame (~800 chars).
+  win="$(fit_window "$SELF" "$CONTEXT_TURNS" $((${#merged} + 800)))"
   mem="$(mem_recent "$SELF" 8)"
   prompt="Ez a beszelgetes eddigi menete (memoria-ablak). Valaszolj a LEGUTOLSO 'user' uzenetre termeszetesen, a kontextust figyelembe veve. Ha mas ugynoknek kell delegalnod, azt a rendszer inter-agent csatornajan teszed.${img_note}
 

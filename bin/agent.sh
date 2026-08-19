@@ -57,8 +57,10 @@ flush_group() {
   # Long-term memory + the bounded conversation window (so the agent remembers
   # its thread, not just its facts). codex exec is stateless per call.
   mem="$(mem_recent "$SELF" 8)"
+  merged="$(cap_batch "$merged")"
   chat_save "$SELF" user "[$GFROM] $merged"
-  win="$(chat_window "$SELF")"
+  # Reserve room for the new turn plus the fixed prompt frame (~800 chars).
+  win="$(fit_window "$SELF" 12 $((${#merged} + 800)))"
   prompt="Ez a beszelgeteseid eddigi menete (a memoriad). A LEGUTOLSO uzenet tole: ${GFROM}. Vegezd el a feladatot / valaszolj ra, a korabbi kontextust figyelembe veve. A valaszod lesz a vegso uzenet.
 
 Hosszutavu memoria (relevans tenyek):
