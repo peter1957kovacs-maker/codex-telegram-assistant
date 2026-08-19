@@ -70,11 +70,11 @@ mem_harvest() { # agent reply -> reply without the MEMORY lines (saves as a side
   printf '%s' "$reply" | grep -v -E '^[[:space:]]*[Mm][Ee][Mm][Oo][Rr][Yy]:'
 }
 
-MEM_INSTRUCTION="Ha a beszelgetesben olyan TARTOS teny, dontes vagy tanulsag szuletik, amit a rovid ablakon TUL is tudnod kell, akkor a valaszod VEGERE tegyel egy-egy sort:
+MEM_INSTRUCTION="KOTELEZO: ha a valaszodban TARTOS teny, dontes, meres vagy tanulsag keletkezik, AZONNAL mentsd -- ugyanebben a valaszban. Ami nem kerul a tartos memoriaba, az VEGLEGESEN elveszik, mert a rovid tavu ablak csak az utolso nehany fordulot hozza vissza. A valaszod VEGERE tegyel egy-egy sort:
 MEMORY: hot | <amin most dolgozunk, aktiv feladat>
 MEMORY: warm | <stabil konfig, preferencia, projekt-kontextus>
 MEMORY: cold | <hosszutavu tanulsag, lezart dontes>
-Egy sor egy teny, onmagaban is ertelmes megfogalmazassal. Ezek a sorok NEM jutnak el a felhasznalohoz, a rendszer kimenti oket. Ha nincs ilyen teny, ne irj MEMORY sort."
+Egy sor egy teny, onmagaban is ertelmes megfogalmazassal. Ezek a sorok NEM jutnak el a felhasznalohoz, a rendszer kimenti oket. Csak akkor hagyd el a MEMORY sort, ha tenylegesen nem keletkezett tartos teny -- ez a kivetel, nem a szokas."
 
 # --- chat window (bounded conversation memory) ---
 chat_save() { # agent role content

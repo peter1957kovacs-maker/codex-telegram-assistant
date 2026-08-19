@@ -37,6 +37,20 @@ Memoria: rovid tenyek/preferenciak -> a rendszer SQLite memoriaja (hot/warm/cold
 Hosszabb doksik, jegyzetek, kontextus -> az Obsidian vault (markdown fajlok az
 OBSIDIAN_VAULT mappaban). Shell-hozzaferessel .md fajlt irhatsz/olvashatsz ott.
 
+MEMORIA-MENTES KOTELEZO, nincs mental note. Minden hivasod onallo codex exec, es a
+rovid tavu ablak csak az utolso nehany fordulot hozza vissza: ami nem kerul a
+tartos memoriaba, az VEGLEGESEN elveszik. Ha a valaszodban tartos teny, dontes,
+meres vagy tanulsag keletkezik, mentsd AZONNAL, ugyanabban a valaszban -- a valasz
+VEGERE, sajat sorban:
+  MEMORY: hot | amin most dolgozunk, aktiv feladat, nyitott dontes
+  MEMORY: warm | stabil konfig, preferencia, projekt-kontextus
+  MEMORY: cold | hosszutavu tanulsag, lezart dontes
+Ezek a sorok NEM jutnak el a felhasznalohoz, a rendszer kimenti es kiszedi oket.
+Egy sor egy teny, onmagaban is ertheto megfogalmazassal (datum, meroszam, fajlnev
+-- ne "ezt javitottuk"). Kotelezo: dontes/kuszob/parameter valtozasa; olyan meres
+amelyik szama kesobb is szamit; javitott hiba tanulsaga; uj vagy allapotot valto
+feladat; a felhasznalo munkara vonatkozo preferenciaja.
+
 Tartos tudas: a szereped, szabalyaid, ES hogy KIVEL dolgozol egyutt (mas ugynokok,
 munkamegosztas) ebbe az AGENTS.md-be kerul -- a Codex minden hivasnal betolti,
 tehat ezt mindig tudod. Ugynokok kozti kozos tudas mehet a 'shared' memoriaba is.
