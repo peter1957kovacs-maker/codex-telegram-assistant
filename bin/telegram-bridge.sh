@@ -48,25 +48,24 @@ download_tg_file() { # <file_id> -> stdout: local path (empty on failure)
 }
 
 offset="$(cat "$OFFSET_FILE" 2>/dev/null || echo 0)"
-log "started; operator=$ALLOWED_USER_ID; context=$CONTEXT_TURNS"
+save_offset() { printf '%s' "$offset" > "$OFFSET_FILE"; }
 
-while true; do
-  # 1) Surface sub-agent replies addressed to 'main' -> operator's Telegram.
-  pend="$(msg_pending "$SELF")"
-  if [ -n "$pend" ]; then
-    while IFS='|' read -r mid from; do
-      [ -z "$mid" ] && continue
-      c="$(dbq "SELECT content FROM agent_messages WHERE id=$mid;")"
-      msg_claim "$mid"; msg_done "$mid" "(forwarded to operator)"
-      send "$ALLOWED_USER_ID" "[$from]: $c"
-    done <<< "$pend"
-  fi
+# --- batching --------------------------------------------------------------
+# One thought often arrives as SEVERAL messages (typing in bursts, forwarding a
+# run of related messages). Answering each separately gives disconnected replies
+# that miss the whole. So: after the first message, wait for DEBOUNCE_SECS of
+# silence, then answer everything as ONE turn. Every new message restarts the
+# window, so a burst of ten messages produces one answer, not ten.
+DEBOUNCE_SECS="${DEBOUNCE_SECS:-8}"
+BATCH_MAX="${BATCH_MAX:-25}"
 
-  # 2) Operator messages from Telegram.
-  resp="$(curl -s --max-time 20 "$API/getUpdates?timeout=12&offset=${offset}&allowed_updates=%5B%22message%22%5D")"
-  [ -z "$resp" ] && { sleep 1; continue; }
-
-  parsed="$(printf '%s' "$resp" | python3 -c '
+# Long-poll and print parsed TSV. Telegram returns as soon as a message arrives,
+# so a short timeout IS the "wait for silence" primitive: empty output = quiet.
+poll_updates() { # <timeout_secs>
+  local t="$1" resp
+  resp="$(curl -s --max-time "$((t + 10))" "$API/getUpdates?timeout=${t}&offset=${offset}&allowed_updates=%5B%22message%22%5D")"
+  [ -z "$resp" ] && return 1
+  printf '%s' "$resp" | python3 -c '
 import json,sys,base64
 try: d=json.load(sys.stdin)
 except Exception: sys.exit(0)
@@ -95,17 +94,24 @@ for u in d.get("result",[]):
     # that codex then rejects outright. "-" means empty.
     b=base64.b64encode(text.encode()).decode()
     sys.stdout.write(str(uid)+"\t"+str(frm)+"\t"+str(chat)+"\t"+(b or "-")+"\t"+(str(voice) or "-")+"\t"+(str(img) or "-")+"\n")
-')"
-  [ -z "$parsed" ] && continue
+'
+}
 
-  max_id="$offset"
+# Fold parsed lines into the batch buffers. Approval commands are executed right
+# away (they are commands, not conversation) and never join the batch. Returns 0
+# if at least one usable operator message was added, 1 otherwise.
+collect() { # <parsed_tsv>
+  local added=1 uid frm chat b64 voice img_file_id text img fp oga
   while IFS=$'\t' read -r uid frm chat b64 voice img_file_id; do
     [ -z "$uid" ] && continue
     img_file_id="${img_file_id:-}"
     [ "$b64" = "-" ] && b64=""
     [ "$voice" = "-" ] && voice=""
     [ "$img_file_id" = "-" ] && img_file_id=""
-    [ "$((uid+1))" -gt "$max_id" ] && max_id="$((uid+1))"
+    [ "$((uid+1))" -gt "$offset" ] && offset="$((uid+1))"
+    if [ "$frm" != "$ALLOWED_USER_ID" ]; then
+      [ -n "$chat" ] && send "$chat" "This is a private assistant."; continue
+    fi
     text="$(printf '%s' "$b64" | base64 --decode 2>/dev/null)"
     # Never let non-UTF-8 bytes reach codex: it rejects the WHOLE stdin on a
     # single invalid byte, and once such a row lands in the chat memory every
@@ -113,14 +119,10 @@ for u in d.get("result",[]):
     if [ -n "$text" ] && ! printf '%s' "$text" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then
       log "dropping non-UTF-8 text (${#text} bytes)"; text=""
     fi
-    if [ "$frm" != "$ALLOWED_USER_ID" ]; then
-      [ -n "$chat" ] && send "$chat" "This is a private assistant."; continue
-    fi
 
     # Voice message -> download + transcribe (Whisper) into text.
-    was_voice=0
     if [ -z "$text" ] && [ -n "$voice" ]; then
-      was_voice=1
+      BATCH_VOICE=1
       fp="$(curl -s "$API/getFile?file_id=$voice" | python3 -c 'import json,sys;print((json.load(sys.stdin).get("result") or {}).get("file_path",""))' 2>/dev/null)"
       if [ -n "$fp" ]; then
         oga="$(mktemp).oga"
@@ -139,9 +141,9 @@ for u in d.get("result",[]):
       log "image saved: $img"
     fi
     [ -z "$text" ] && [ -z "$img" ] && continue
-    [ -z "$text" ] && text="(kép, kísérőszöveg nélkül -- mondd el mit látsz rajta)"
+    [ -z "$text" ] && text="(kép kísérőszöveg nélkül: $(basename "$img"))"
 
-    # Approval commands from the operator (approve/deny an id).
+    # Approval commands from the operator (approve/deny an id) -- act now.
     case "$text" in
       approve\ [0-9]*|jovahagy\ [0-9]*|elfogad\ [0-9]*)
         aid="${text##* }"; approval_resolve "$aid" approved; audit "$ALLOWED_USER_ID" "approval.approved" "#$aid"
@@ -151,15 +153,74 @@ for u in d.get("result",[]):
         send "$chat" "Elutasítva: #$aid"; continue;;
     esac
 
-    if ! "$CODEX" login status >/dev/null 2>&1; then
-      send "$chat" "A Codex nincs bejelentkezve. Futtasd egyszer: codex login"; continue
-    fi
+    [ ${#BATCH_TEXTS[@]} -ge "$BATCH_MAX" ] && break
+    BATCH_CHAT="$chat"
+    BATCH_TEXTS+=("$text")
+    [ -n "$img" ] && BATCH_IMGS+=("$img")
+    added=0
+  done <<< "$1"
+  return $added
+}
 
-    chat_save "$SELF" user "$text${img:+ [kep: $img]}"
-    win="$(chat_window "$SELF" "$CONTEXT_TURNS")"
-    mem="$(mem_recent "$SELF" 8)"
-    prompt="Ez a beszelgetes eddigi menete (memoria-ablak). Valaszolj a LEGUTOLSO 'user' uzenetre termeszetesen, a kontextust figyelembe veve. Ha mas ugynoknek kell delegalnod, azt a rendszer inter-agent csatornajan teszed.${img:+
-A legutolso uzenethez KEP is tartozik, csatolva kapod (${img}). Nezd meg, es arra is valaszolj.}
+while true; do
+  # 1) Surface sub-agent replies addressed to 'main' -> operator's Telegram.
+  pend="$(msg_pending "$SELF")"
+  if [ -n "$pend" ]; then
+    while IFS='|' read -r mid from; do
+      [ -z "$mid" ] && continue
+      c="$(dbq "SELECT content FROM agent_messages WHERE id=$mid;")"
+      msg_claim "$mid"; msg_done "$mid" "(forwarded to operator)"
+      send "$ALLOWED_USER_ID" "[$from]: $c"
+    done <<< "$pend"
+  fi
+
+  # 2) Operator messages from Telegram, batched.
+  parsed="$(poll_updates 12)" || { sleep 1; continue; }
+  [ -z "$parsed" ] && continue
+
+  BATCH_TEXTS=(); BATCH_IMGS=(); BATCH_CHAT=""; BATCH_VOICE=0
+  collect "$parsed" || { save_offset; continue; }
+  save_offset
+
+  while [ ${#BATCH_TEXTS[@]} -lt "$BATCH_MAX" ]; do
+    more="$(poll_updates "$DEBOUNCE_SECS")" || break
+    [ -z "$more" ] && break            # silence -> the thought is finished
+    collect "$more" || { save_offset; break; }
+    save_offset
+  done
+
+  if ! "$CODEX" login status >/dev/null 2>&1; then
+    send "$BATCH_CHAT" "A Codex nincs bejelentkezve. Futtasd egyszer: codex login"; continue
+  fi
+
+  # Merge into ONE user turn. Numbering the parts tells the model they arrived
+  # separately but belong together, so it answers the whole, not the fragment.
+  n=${#BATCH_TEXTS[@]}
+  if [ "$n" -eq 1 ]; then
+    merged="${BATCH_TEXTS[0]}"
+  else
+    merged="(A felhasznalo $n uzenetben irta le ugyanezt az egy dolgot, egyben kezeld, egy valaszt adj ra:)"
+    i=1
+    for t in "${BATCH_TEXTS[@]}"; do
+      merged="$merged
+[$i] $t"
+      i=$((i+1))
+    done
+  fi
+
+  IMG_ARGS=(); img_note=""
+  if [ ${#BATCH_IMGS[@]} -gt 0 ]; then
+    for p in "${BATCH_IMGS[@]}"; do IMG_ARGS+=(-i "$p"); done
+    img_note="
+Az uzenethez ${#BATCH_IMGS[@]} KEP is tartozik, csatolva kapod. Nezd meg, es azokra is valaszolj."
+    merged="$merged
+(csatolt kepek: ${BATCH_IMGS[*]})"
+  fi
+
+  chat_save "$SELF" user "$merged"
+  win="$(chat_window "$SELF" "$CONTEXT_TURNS")"
+  mem="$(mem_recent "$SELF" 8)"
+  prompt="Ez a beszelgetes eddigi menete (memoria-ablak). Valaszolj a LEGUTOLSO 'user' uzenetre termeszetesen, a kontextust figyelembe veve. Ha mas ugynoknek kell delegalnod, azt a rendszer inter-agent csatornajan teszed.${img_note}
 
 Hosszutavu memoria (relevans tenyek):
 ${mem}
@@ -168,31 +229,26 @@ ${mem}
 ${win}
 --- vege ---"
 
-    # -i attaches the image to the prompt (empty-array safe under set -u).
-    IMG_ARGS=(); [ -n "$img" ] && IMG_ARGS=(-i "$img")
-    out="$(mktemp)"
-    if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} ${IMG_ARGS[@]+"${IMG_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
-      reply="$(cat "$out")"; [ -z "$reply" ] && reply="(ures valasz)"
+  out="$(mktemp)"
+  if printf '%s' "$prompt" | ( cd "$AGENT_DIR" && "$CODEX" exec --skip-git-repo-check ${MODEL_ARGS[@]+"${MODEL_ARGS[@]}"} ${IMG_ARGS[@]+"${IMG_ARGS[@]}"} -o "$out" ) >/dev/null 2>&1; then
+    reply="$(cat "$out")"; [ -z "$reply" ] && reply="(ures valasz)"
+  else
+    reply="[hiba: a Codex most nem tudott valaszolni. Probald ujra.]"
+  fi
+  rm -f "$out"
+  chat_save "$SELF" assistant "$reply"
+  # Voice reply if any part of the batch was voice and VOICE_REPLY is on.
+  if [ "$BATCH_VOICE" = 1 ] && [ "${VOICE_REPLY:-0}" = 1 ]; then
+    ogg="$(mktemp).ogg"
+    if tts "$reply" "$ogg"; then
+      curl -s "$API/sendVoice" -F "chat_id=$BATCH_CHAT" -F "voice=@$ogg" >/dev/null 2>&1
     else
-      reply="[hiba: a Codex most nem tudott valaszolni. Probald ujra.]"
+      send "$BATCH_CHAT" "$reply"
     fi
-    rm -f "$out"
-    chat_save "$SELF" assistant "$reply"
-    # Voice reply if the inbound was voice and VOICE_REPLY is on.
-    if [ "$was_voice" = 1 ] && [ "${VOICE_REPLY:-0}" = 1 ]; then
-      ogg="$(mktemp).ogg"
-      if tts "$reply" "$ogg"; then
-        curl -s "$API/sendVoice" -F "chat_id=$chat" -F "voice=@$ogg" >/dev/null 2>&1
-      else
-        send "$chat" "$reply"
-      fi
-      rm -f "$ogg"
-    else
-      send "$chat" "$reply"
-    fi
-    log "answered operator (${#reply} chars)"
-  done <<< "$parsed"
-
-  offset="$max_id"
-  printf '%s' "$offset" > "$OFFSET_FILE"
+    rm -f "$ogg"
+  else
+    send "$BATCH_CHAT" "$reply"
+  fi
+  log "answered operator (batch=$n msg, images=${#BATCH_IMGS[@]}, ${#reply} chars)"
+  save_offset
 done

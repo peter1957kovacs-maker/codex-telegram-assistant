@@ -144,6 +144,30 @@ table). Cron jobs, scripts and external feeders can also write to the queue;
 answering those posts a message nobody reads and can bounce between runtimes. The
 work still runs — only the reply is skipped, and the log says why.
 
+## Batching · Több üzenet, egy válasz
+
+One thought usually arrives as several Telegram messages (typing in bursts,
+forwarding a run of related messages). Answering each separately gives
+disconnected replies that miss the whole, so the bridge batches:
+
+- after the first message it long-polls with a short timeout; Telegram returns as
+  soon as a message arrives, so an empty response IS the "operator went quiet"
+  signal;
+- every new message restarts the window (`DEBOUNCE_SECS`, default 8);
+- the parts are merged into ONE numbered user turn (`[1] … [2] …`) with a line
+  saying they arrived separately but belong together — otherwise the model tends
+  to answer only the last fragment;
+- every image in the batch is attached to that single call (`-i` per image), and
+  if any part was a voice message the voice-reply path still applies;
+- `BATCH_MAX` (default 25) caps a flood.
+
+One `codex exec`, one reply per batch. Approval commands (`approve 12`) are still
+executed immediately and never join a batch.
+
+Note for hackers: `poll_updates` runs inside `$(...)`, i.e. a subshell, so
+anything it assigns is lost. Per-call state belongs in a file; the offset and the
+batch buffers are mutated by `collect`, which is called directly.
+
 ## Images · Képek
 
 Send a photo on Telegram and `main` sees it: the bridge downloads the bytes and
