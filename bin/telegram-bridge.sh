@@ -88,7 +88,13 @@ for u in d.get("result",[]):
         doc=m.get("document") or {}
         if str(doc.get("mime_type","")).startswith("image/"):
             img=doc.get("file_id","")
-    sys.stdout.write(str(uid)+"\t"+str(frm)+"\t"+str(chat)+"\t"+base64.b64encode(text.encode()).decode()+"\t"+str(voice)+"\t"+str(img)+"\n")
+    # NEVER emit an empty field: bash treats TAB as IFS-whitespace, so `read`
+    # collapses a run of tabs into ONE delimiter and every later field shifts
+    # left. A voice message or a caption-less photo (empty b64) would put the
+    # file_id into the text slot, where base64-decoding it yields BINARY garbage
+    # that codex then rejects outright. "-" means empty.
+    b=base64.b64encode(text.encode()).decode()
+    sys.stdout.write(str(uid)+"\t"+str(frm)+"\t"+str(chat)+"\t"+(b or "-")+"\t"+(str(voice) or "-")+"\t"+(str(img) or "-")+"\n")
 ')"
   [ -z "$parsed" ] && continue
 
@@ -96,8 +102,17 @@ for u in d.get("result",[]):
   while IFS=$'\t' read -r uid frm chat b64 voice img_file_id; do
     [ -z "$uid" ] && continue
     img_file_id="${img_file_id:-}"
+    [ "$b64" = "-" ] && b64=""
+    [ "$voice" = "-" ] && voice=""
+    [ "$img_file_id" = "-" ] && img_file_id=""
     [ "$((uid+1))" -gt "$max_id" ] && max_id="$((uid+1))"
     text="$(printf '%s' "$b64" | base64 --decode 2>/dev/null)"
+    # Never let non-UTF-8 bytes reach codex: it rejects the WHOLE stdin on a
+    # single invalid byte, and once such a row lands in the chat memory every
+    # later call fails too, not just the one that caused it.
+    if [ -n "$text" ] && ! printf '%s' "$text" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then
+      log "dropping non-UTF-8 text (${#text} bytes)"; text=""
+    fi
     if [ "$frm" != "$ALLOWED_USER_ID" ]; then
       [ -n "$chat" ] && send "$chat" "This is a private assistant."; continue
     fi
